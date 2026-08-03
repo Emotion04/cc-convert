@@ -1,0 +1,332 @@
+# cc-convert
+
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![PyPI](https://img.shields.io/pypi/v/cc-convert.svg)](https://pypi.org/project/cc-convert/)
+
+**English | [中文](README_zh.md)**
+
+A lightweight proxy with multi-instance management dashboard
+
+---
+
+### Why CC Convert
+
+- **Bidirectional Protocol Conversion** — Anthropic Messages API ↔ OpenAI Chat Completions API. Run Claude SDK / Claude Code on any OpenAI-compatible backend (vLLM, SGLang, cloud APIs).
+- **OpenAI-Native Passthrough** — `POST /v1/chat/completions` forwards requests as-is with zero conversion overhead. All upstream fields preserved.
+- **OpenAI Responses API Bridge** — `POST /v1/responses` accepts the Responses API format and translates to `/v1/chat/completions` for backends that only implement chat completions. Lets Responses SDK clients talk to any vLLM/SGLang backend.
+- **Server-Side Web Search** — Built-in Tavily / TongXiao search. Give any model internet access without client-side changes.
+- **Interleaved Thinking** — Full support for `thinking` blocks with `chat_template_kwargs` and `reasoning_effort`. DeepSeek V4 and other reasoning models work out of the box.
+- **Streaming, Tools & Vision** — SSE real-time streaming, Claude `tool_use` conversion, multi-modal image input. Full API surface coverage.
+- **Model Name Mapping** — Wildcard rules map Anthropic model names to backend models automatically.
+- **Daemon + Web Dashboard** — `ccconvert start/stop/logs` for one-command management. Built-in web UI for request monitoring.
+
+---
+
+## What This Does
+
+Three modes of operation:
+
+| Mode | Endpoint | Use Case |
+|------|----------|----------|
+| **Anthropic Proxy** | `POST /v1/messages` | Claude SDK / Claude Code apps talking to any OpenAI backend |
+| **OpenAI Passthrough** | `POST /v1/chat/completions` | OpenAI-native clients bypassing conversion entirely |
+| **Responses Bridge** | `POST /v1/responses` | OpenAI Responses SDK clients talking to chat-completions-only backends |
+
+![Architecture](./architecture.png)
+
+---
+
+## Quick Start
+
+```bash
+pip install cc-convert
+ccconvert start
+# Dashboard opens at http://127.0.0.1:<auto-port>
+```
+
+### Docker
+
+```bash
+docker run -d --name ccconvert -p 8080:8080 \
+  -e CCCONVERT_OPENAI_API_KEY=your-key \
+  -e CCCONVERT_OPENAI_BASE_URL=http://host.docker.internal:8000/v1 \
+  cc-convert/cc-convert:latest
+```
+
+> Multi-instance setup in Docker requires `--net=host` or explicit `-p <port>:<port>` mappings for each instance port.
+
+### Usage Example
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(base_url="http://localhost:8080", api_key="any")
+
+message = client.messages.create(
+    model="your-model",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(message.content[0].text)
+```
+
+---
+
+## Multi-Instance Setup
+
+Run multiple independent proxy instances for different Claude Code windows or projects.
+
+1. Open the Dashboard (run `ccconvert start` and visit the URL shown)
+2. Click **Add Instance**
+3. Fill in the details:
+   - **Name** — A friendly label for this instance
+   - **Port** — Auto-suggested; change if needed
+   - **Upstream Base URL** — Your backend endpoint (e.g., `http://localhost:8000/v1`)
+   - **Upstream API Key** — Your backend API key
+   - **Target Model** — The model name to use
+4. Click **Save**, then **Start**
+5. Each running instance gets its own port — use different ports for different Claude Code windows
+6. Copy the environment snippet from the instance card:
+
+   **PowerShell:**
+   ```powershell
+   $env:ANTHROPIC_BASE_URL="http://127.0.0.1:<port>"; $env:ANTHROPIC_AUTH_TOKEN="local"; claude
+   ```
+
+   **Bash:**
+   ```bash
+   export ANTHROPIC_BASE_URL=http://127.0.0.1:<port> && export ANTHROPIC_AUTH_TOKEN=local && claude
+   ```
+
+   **CMD:**
+   ```cmd
+   set ANTHROPIC_BASE_URL=http://127.0.0.1:<port> && set ANTHROPIC_AUTH_TOKEN=local && claude
+   ```
+
+---
+
+## CLI Reference
+
+```bash
+ccconvert start              # Start the manager in background
+ccconvert stop               # Stop the manager
+ccconvert restart            # Restart the manager
+ccconvert status             # Check if running
+ccconvert logs               # Show recent logs
+ccconvert logs -f            # Follow logs in real-time
+ccconvert open               # Open the web dashboard in browser
+```
+
+Run `ccconvert` without any arguments to see the full help.
+
+---
+
+## Configuration
+
+Config file: `~/.ccconvert/config.toml` (auto-created by the first run)
+
+The configuration uses `[manager]` for global dashboard settings and `[[instances]]` for each proxy instance. You can also manage instances through the web dashboard — the config file is written automatically.
+
+### Manager
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `host` | No | `0.0.0.0` | Dashboard bind address |
+| `port` | No | `0` | Dashboard port (`0` = auto-assign) |
+| `log_level` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+### Instances
+
+Each `[[instances]]` block defines an independent proxy:
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `name` | No | `"default"` | Instance label |
+| `port` | Yes | — | Proxy listen port |
+| `openai_api_key` | Yes | — | API key for the upstream backend |
+| `openai_base_url` | Yes | `https://api.openai.com/v1` | Upstream backend URL |
+| `openai_org_id` | No | — | OpenAI Organization ID |
+| `openai_project_id` | No | — | OpenAI Project ID |
+| `api_key` | No | — | Auth key for requests to this proxy (Bearer token) |
+| `default_model` | No | — | Fallback model name |
+| `request_timeout` | No | `300.0` | Upstream request timeout (seconds) |
+
+### Per-Instance Model Name Mapping
+
+Each instance can have its own model mapping rules with wildcard support:
+
+```toml
+[[instances]]
+name = "my-instance"
+# ... other settings ...
+
+[[instances.model_mapping]]
+from = "sonnet"
+to = "kimi-k2.5"
+
+[[instances.model_mapping]]
+from = "*opus*"
+to = "deepseek-v4"
+```
+
+`from` supports `*` and `?` wildcards. `default_model` is the fallback when no rule matches.
+
+### Web Search
+
+Global search provider configuration, shared across all instances. Supports [Tavily](https://tavily.com) and [TongXiao (通晓)](https://www.aliyun.com/product/tongxiao).
+
+```toml
+tavily_api_key = "tvly-xxx"
+tongxiao_api_key = "xxx"
+websearch_provider = "tavily"       # "tavily", "tongxiao", or "both"
+websearch_max_uses = 5
+tavily_max_results = 5
+tongxiao_max_results = 5
+```
+
+### CORS
+
+Global CORS settings, shared across all instances:
+
+```toml
+cors_origins = ["*"]
+cors_credentials = true
+cors_methods = ["*"]
+cors_headers = ["*"]
+```
+
+---
+
+## API Endpoints
+
+### Anthropic-Compatible
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/messages` | Create a message (streaming via `stream: true`) |
+| `GET` | `/v1/models` | List available models (proxied) |
+| `POST` | `/v1/messages/count_tokens` | Count tokens (local tiktoken estimation) |
+| `GET` | `/health` | Health check |
+
+### OpenAI-Native Passthrough
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/chat/completions` | OpenAI-format chat completions (streaming & non-streaming) |
+
+The passthrough endpoint forwards requests directly to the upstream — no validation, no conversion, no model mapping. All fields (including `chat_template_kwargs`, `reasoning_effort`, etc.) are preserved as-is.
+
+### OpenAI Responses API Bridge
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/responses` | OpenAI Responses-format request, translated to chat/completions upstream |
+
+Accepts the Responses API request shape (`input`, `instructions`, `reasoning.effort`, `tools` of type `function`, `max_output_tokens`, …) and translates it to a `/v1/chat/completions` call against the upstream backend. The upstream chat completion is translated back into a Responses `Response` object. Both streaming and non-streaming modes are supported — streaming emits the full Responses SSE event sequence (`response.created` → `response.output_text.delta` → `response.completed`).
+
+**Server-side web search**: when the request includes a `web_search` / `web_search_preview` tool and a search provider is configured (Tavily or 通晓/TongXiao), the proxy runs the search loop locally. The `web_search` tool is exposed to the model as a function tool, executed via the configured provider when called, and the results are fed back so the model can answer with up-to-date information. The Responses output includes one `web_search_call` item per executed search. Configure search the same way as for the Anthropic path:
+
+```toml
+tavily_api_key = "tvly-xxx"
+# or
+tongxiao_api_key = "xxx"
+websearch_provider = "tavily"       # "tavily", "tongxiao", or "both"
+websearch_max_uses = 5
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="any")
+resp = client.responses.create(
+    model="your-model",
+    input="Hello!",
+    instructions="Be concise",
+)
+print(resp.output_text)
+```
+
+---
+
+## Features
+
+- **Streaming** — SSE real-time token streaming in both Anthropic and OpenAI modes
+- **Tool Calling** — Claude-compatible tool use (`tool_use` / `tool_result`) converted to OpenAI function calls
+- **Vision** — Multi-modal image input via `image_url` content blocks
+- **Thinking / Reasoning** — Supports `thinking` blocks with `chat_template_kwargs` (vLLM/SGLang) and `output_config.effort` to `reasoning_effort` mapping for DeepSeek V4
+- **Web Search** — Server-side web search via Tavily or TongXiao (通晓), usable with any model
+- **Model Mapping** — Wildcard-based model name resolution
+- **API Auth** — Optional Bearer token authentication for the proxy itself
+- **Web Dashboard** — Built-in web UI at `/` for monitoring request statistics
+- **Daemon Mode** — Background service management (start/stop/restart/status/logs)
+
+---
+
+## Using with Claude Code
+
+### Docker (Recommended)
+
+The repo includes a `docker-compose.yml` with both CC Convert proxy and Claude Code pre-configured:
+
+```bash
+cat > .env << 'EOF'
+CCCONVERT_OPENAI_API_KEY=your-api-key
+CCCONVERT_OPENAI_BASE_URL=http://host.docker.internal:8000/v1
+CLAUDE_MODEL=your-model-name
+EOF
+
+docker-compose up -d
+docker-compose exec claude-code claude --dangerously-skip-permissions
+```
+
+> Multi-instance setup in Docker requires `--net=host` or explicit port mappings for each instance port.
+
+### Local Installation
+
+Configure `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:8080",
+    "ANTHROPIC_API_KEY": "any",
+    "ANTHROPIC_MODEL": "your-model",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "your-model",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "your-model",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "your-model"
+  }
+}
+```
+
+Then start the proxy (`ccconvert start`) and launch Claude Code (`claude`).
+
+---
+
+## Supported Backends
+
+| Backend | Status |
+|---------|--------|
+| [vLLM](https://github.com/vllm-project/vllm) | Fully supported |
+| [SGLang](https://github.com/sgl-project/sglang) | Fully supported |
+| Any OpenAI-compatible API | Should work |
+
+> Ollama natively supports the Anthropic API format — point Claude SDK directly to `http://localhost:11434/v1`, no proxy needed.
+
+---
+
+## Development
+
+```bash
+git clone https://github.com/cc-convert/cc-convert.git
+cd cc-convert
+pip install -e ".[dev]"
+
+pytest                           # 445+ tests, >80% coverage
+```
+
+---
+
+## License
+
+Apache License 2.0

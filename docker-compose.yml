@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+# cc-convert Docker Compose Configuration
+# Uses pre-built images from Docker Hub by default
+
+services:
+  ccconvert:
+    image: cc-convert/cc-convert:latest
+    container_name: cc-convert
+    ports:
+      - "${CCCONVERT_PORT:-8080}:8080"
+    environment:
+      # Required: OpenAI API configuration
+      - CCCONVERT_OPENAI_API_KEY=${CCCONVERT_OPENAI_API_KEY:-}
+      - CCCONVERT_OPENAI_BASE_URL=${CCCONVERT_OPENAI_BASE_URL:-http://host.docker.internal:8000/v1}
+      
+      # Optional: Server configuration
+      - CCCONVERT_HOST=${CCCONVERT_HOST:-0.0.0.0}
+      - CCCONVERT_PORT=${CCCONVERT_PORT:-8080}
+      - CCCONVERT_API_KEY=${CCCONVERT_API_KEY:-}
+      - CCCONVERT_LOG_LEVEL=${CCCONVERT_LOG_LEVEL:-INFO}
+      
+      # Optional: Tavily web search
+      - CCCONVERT_TAVILY_API_KEY=${CCCONVERT_TAVILY_API_KEY:-}
+      - CCCONVERT_TAVILY_MAX_RESULTS=${CCCONVERT_TAVILY_MAX_RESULTS:-5}
+      - CCCONVERT_TAVILY_TIMEOUT=${CCCONVERT_TAVILY_TIMEOUT:-30}
+      - CCCONVERT_WEBSEARCH_MAX_USES=${CCCONVERT_WEBSEARCH_MAX_USES:-5}
+
+      # Optional: TongXiao Web Search
+      - CCCONVERT_TONGXIAO_API_KEY=${CCCONVERT_TONGXIAO_API_KEY:-}
+      - CCCONVERT_TONGXIAO_MAX_RESULTS=${CCCONVERT_TONGXIAO_MAX_RESULTS:-5}
+      - CCCONVERT_TONGXIAO_TIMEOUT=${CCCONVERT_TONGXIAO_TIMEOUT:-30}
+      - CCCONVERT_WEBSEARCH_PROVIDER=${CCCONVERT_WEBSEARCH_PROVIDER:-tavily}
+
+      # Optional: CORS settings
+      - CCCONVERT_CORS_ORIGINS=${CCCONVERT_CORS_ORIGINS:-*}
+      - CCCONVERT_CORS_CREDENTIALS=${CCCONVERT_CORS_CREDENTIALS:-true}
+      - CCCONVERT_CORS_METHODS=${CCCONVERT_CORS_METHODS:-*}
+      - CCCONVERT_CORS_HEADERS=${CCCONVERT_CORS_HEADERS:-*}
+
+      # Timezone (default: Asia/Shanghai)
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      # Optional: Mount a custom config file
+      - ./config:/app/config:ro
+      # Optional: Mount logs directory
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - ccconvert-network
+
+  claude-code:
+    image: cc-convert/claude-code:latest
+    container_name: claude-code
+    depends_on:
+      ccconvert:
+        condition: service_healthy
+    environment:
+      # Point Claude Code to CC Convert proxy
+      - ANTHROPIC_BASE_URL=http://ccconvert:8080
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-local}
+
+      # Model configuration (customizable via env)
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-kimi-k2.5}
+      - CLAUDE_OPUS_MODEL=${CLAUDE_OPUS_MODEL:-kimi-k2.5}
+      - CLAUDE_SONNET_MODEL=${CLAUDE_SONNET_MODEL:-kimi-k2.5}
+      - CLAUDE_HAIKU_MODEL=${CLAUDE_HAIKU_MODEL:-kimi-k2.5}
+      - CLAUDE_REASONING_MODEL=${CLAUDE_REASONING_MODEL:-kimi-k2.5}
+
+      # API timeout
+      - API_TIMEOUT_MS=${API_TIMEOUT_MS:-120000}
+
+      # Timezone (default: Asia/Shanghai)
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      # Workspace directory for development
+      - ./workspace:/workspace
+      # Claude Code full configuration directory
+      - ./claude-code/.claude:/home/claude/.claude:rw
+      # Claude Code user state file
+      - ./claude-code/.claude.json:/home/claude/.claude.json:rw
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    user: claude
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    command: ["tail", "-f", "/dev/null"]
+    # Enable sandbox capabilities for bubblewrap
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - CHOWN
+      - SETUID
+      - SETGID
+    networks:
+      - ccconvert-network
+
+networks:
+  ccconvert-network:
+    driver: bridge

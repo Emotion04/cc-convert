@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: Apache-2.0
+# Local build configuration for development
+# Use this file to build images locally instead of pulling from Docker Hub
+#
+# Usage: docker-compose -f docker-compose.build.yml up -d --build
+
+services:
+  ccconvert:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cc-convert
+    ports:
+      - "${CCCONVERT_PORT:-8080}:8080"
+    environment:
+      - CCCONVERT_OPENAI_API_KEY=${CCCONVERT_OPENAI_API_KEY:-}
+      - CCCONVERT_OPENAI_BASE_URL=${CCCONVERT_OPENAI_BASE_URL:-http://host.docker.internal:8000/v1}
+      - CCCONVERT_HOST=${CCCONVERT_HOST:-0.0.0.0}
+      - CCCONVERT_PORT=${CCCONVERT_PORT:-8080}
+      - CCCONVERT_API_KEY=${CCCONVERT_API_KEY:-}
+      - CCCONVERT_LOG_LEVEL=${CCCONVERT_LOG_LEVEL:-INFO}
+      - CCCONVERT_TAVILY_API_KEY=${CCCONVERT_TAVILY_API_KEY:-}
+      - CCCONVERT_TAVILY_MAX_RESULTS=${CCCONVERT_TAVILY_MAX_RESULTS:-5}
+      - CCCONVERT_TAVILY_TIMEOUT=${CCCONVERT_TAVILY_TIMEOUT:-30}
+      - CCCONVERT_WEBSEARCH_MAX_USES=${CCCONVERT_WEBSEARCH_MAX_USES:-5}
+
+      # TongXiao Web Search Configuration
+      - CCCONVERT_TONGXIAO_API_KEY=${CCCONVERT_TONGXIAO_API_KEY:-}
+      - CCCONVERT_TONGXIAO_MAX_RESULTS=${CCCONVERT_TONGXIAO_MAX_RESULTS:-5}
+      - CCCONVERT_TONGXIAO_TIMEOUT=${CCCONVERT_TONGXIAO_TIMEOUT:-30}
+      - CCCONVERT_WEBSEARCH_PROVIDER=${CCCONVERT_WEBSEARCH_PROVIDER:-tavily}
+
+      - CCCONVERT_CORS_ORIGINS=${CCCONVERT_CORS_ORIGINS:-*}
+      - CCCONVERT_CORS_CREDENTIALS=${CCCONVERT_CORS_CREDENTIALS:-true}
+      - CCCONVERT_CORS_METHODS=${CCCONVERT_CORS_METHODS:-*}
+      - CCCONVERT_CORS_HEADERS=${CCCONVERT_CORS_HEADERS:-*}
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - ccconvert-network
+
+  claude-code:
+    build:
+      context: ./claude-code
+      dockerfile: Dockerfile
+    container_name: claude-code
+    depends_on:
+      ccconvert:
+        condition: service_healthy
+    environment:
+      - ANTHROPIC_BASE_URL=http://ccconvert:8080
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-local}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-kimi-k2.5}
+      - CLAUDE_OPUS_MODEL=${CLAUDE_OPUS_MODEL:-kimi-k2.5}
+      - CLAUDE_SONNET_MODEL=${CLAUDE_SONNET_MODEL:-kimi-k2.5}
+      - CLAUDE_HAIKU_MODEL=${CLAUDE_HAIKU_MODEL:-kimi-k2.5}
+      - CLAUDE_REASONING_MODEL=${CLAUDE_REASONING_MODEL:-kimi-k2.5}
+      - API_TIMEOUT_MS=${API_TIMEOUT_MS:-120000}
+    volumes:
+      - ./workspace:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    user: claude
+    command: bash
+    # Enable sandbox capabilities
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - CHOWN
+      - SETUID
+      - SETGID
+    networks:
+      - ccconvert-network
+
+networks:
+  ccconvert-network:
+    driver: bridge

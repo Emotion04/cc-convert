@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# cc-convert Docker Compose Test Configuration
+
+services:
+  ccconvert:
+    image: cc-convert:test-fixed
+    container_name: cc-convert-test
+    ports:
+      - "54322:8080"
+    volumes:
+      # Mount config file from local
+      - ./config/config.toml:/root/.ccconvert/config.toml:ro
+      # Mount logs directory
+      - ./logs:/root/.local/share/ccconvert
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - ccconvert-network
+
+networks:
+  ccconvert-network:
+    driver: bridge

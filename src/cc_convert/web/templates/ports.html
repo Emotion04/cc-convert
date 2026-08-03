@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block title %}端口管理 - CC Convert Manager{% endblock %}
+{% block page_title %}端口管理{% endblock %}
+{% block page_subtitle %}监控和维护代理端口健康{% endblock %}
+
+{% block content %}
+<div x-data="ports()" x-init="init()">
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-5 mb-6">
+        <div class="glass-card rounded-2xl p-5">
+            <p class="text-[10px] text-stone-400 uppercase tracking-wider font-semibold">总端口</p>
+            <p class="text-2xl font-bold text-stone-900 font-mono mt-1" x-text="rows.length"></p>
+        </div>
+        <div class="glass-card rounded-2xl p-5">
+            <p class="text-[10px] text-stone-400 uppercase tracking-wider font-semibold">健康</p>
+            <p class="text-2xl font-bold text-teal-600 font-mono mt-1" x-text="countByStatus('healthy')"></p>
+        </div>
+        <div class="glass-card rounded-2xl p-5">
+            <p class="text-[10px] text-stone-400 uppercase tracking-wider font-semibold">冲突</p>
+            <p class="text-2xl font-bold text-red-500 font-mono mt-1" x-text="countByStatus('conflict')"></p>
+        </div>
+        <div class="glass-card rounded-2xl p-5">
+            <p class="text-[10px] text-stone-400 uppercase tracking-wider font-semibold">未监听</p>
+            <p class="text-2xl font-bold text-amber-500 font-mono mt-1" x-text="countByStatus('down')"></p>
+        </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="glass-card rounded-2xl p-5 mb-6">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <h3 class="text-sm font-bold text-stone-900">端口健康概览</h3>
+                <span class="text-xs text-stone-400" x-text="lastUpdated ? '上次更新: ' + lastUpdated : ''"></span>
+            </div>
+            <button @click="fetchOverview()" class="btn-primary px-4 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer inline-flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"/>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                刷新
+            </button>
+        </div>
+        <p class="text-xs text-stone-400 mt-2">
+            端口被其他进程占用时标记为「冲突」。可对实例执行「重新分配」换到新的空闲端口；对冲突端口可「查看占用」定位占用进程。
+        </p>
+    </div>
+
+    <!-- Ports Table -->
+    <div class="glass-card rounded-2xl overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-stone-50 border-b border-stone-200 text-left">
+                        <th class="px-5 py-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">端口</th>
+                        <th class="px-5 py-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">归属</th>
+                        <th class="px-5 py-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">状态</th>
+                        <th class="px-5 py-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">监听进程</th>
+                        <th class="px-5 py-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">上游可达</th>
+                        <th class="px-5 py-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="row in rows" :key="row.kind + '-' + row.port">
+                        <tr class="border-b border-stone-100 hover:bg-stone-50/50">
+                            <!-- Port -->
+                            <td class="px-5 py-3.5">
+                                <span class="font-mono font-semibold text-stone-800" x-text="'http://127.0.0.1:' + row.port"></span>
+                            </td>
+                            <!-- Owner -->
+                            <td class="px-5 py-3.5">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs font-medium text-stone-600" x-text="row.name"></span>
+                                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-500"
+                                          x-text="row.kind === 'manager' ? '管理' : '实例'"></span>
+                                </div>
+                            </td>
+                            <!-- Status -->
+                            <td class="px-5 py-3.5">
+                                <span class="badge"
+                                      :class="{
+                                          'bg-teal-50 text-teal-600': row.status === 'healthy',
+                                          'bg-red-50 text-red-600': row.status === 'conflict',
+                                          'bg-amber-50 text-amber-600': row.status === 'down',
+                                      }">
+                                    <span x-text="statusLabel(row.status)"></span>
+                                </span>
+                            </td>
+                            <!-- Listening process -->
+                            <td class="px-5 py-3.5">
+                                <div x-show="row.listening">
+                                    <span class="text-xs text-stone-600 font-mono" x-text="'PID ' + (row.pid || '?')"></span>
+                                    <span x-show="row.pid_name" class="text-[10px] text-stone-400 ml-1" x-text="row.pid_name"></span>
+                                    <span x-show="row.pid === row.our_pid" class="text-[10px] text-teal-600 ml-1">(CC Convert)</span>
+                                    <span x-show="row.pid !== row.our_pid" class="text-[10px] text-red-400 ml-1">(外部)</span>
+                                </div>
+                                <span x-show="!row.listening" class="text-xs text-stone-400">未监听</span>
+                            </td>
+                            <!-- Upstream -->
+                            <td class="px-5 py-3.5">
+                                <template x-if="row.upstream !== null">
+                                    <span class="text-xs"
+                                          :class="row.upstream ? 'text-teal-600' : 'text-red-400'">
+                                        <span x-text="row.upstream ? '可达' : '不可达'"></span>
+                                    </span>
+                                </template>
+                                <template x-if="row.upstream === null">
+                                    <span class="text-xs text-stone-300">-</span>
+                                </template>
+                            </td>
+                            <!-- Actions -->
+                            <td class="px-5 py-3.5">
+                                <div class="flex justify-end gap-2">
+                                    <!-- Recheck -->
+                                    <button @click="checkRow(row)"
+                                            class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-stone-100 text-stone-600 hover:bg-stone-200 transition cursor-pointer">
+                                        检查
+                                    </button>
+                                    <!-- Rebind (instances only) -->
+                                    <button x-show="row.kind === 'instance' && row.status === 'conflict'"
+                                            @click="confirmRebind(row)"
+                                            class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 transition cursor-pointer">
+                                        重新分配
+                                    </button>
+                                    <!-- Show occupying process (conflict) -->
+                                    <button x-show="row.status === 'conflict' && row.pid"
+                                            @click="inspectProcess(row)"
+                                            class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 hover:bg-amber-100 transition cursor-pointer">
+                                        占用详情
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="rows.length === 0">
+                        <td colspan="6" class="px-5 py-10 text-center text-sm text-stone-400">暂无端口信息</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Rebind Confirmation Dialog -->
+    <div x-show="rebindTarget"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+         @click.self="rebindTarget = null">
+        <div class="bg-white rounded-2xl shadow-xl p-6 w-96">
+            <h3 class="text-base font-bold text-stone-900 mb-2">重新分配端口</h3>
+            <p class="text-sm text-stone-500 mb-4">
+                实例 <span class="font-semibold text-stone-700" x-text="rebindTarget?.name"></span>
+                的端口 <span class="font-mono font-semibold text-stone-700" x-text="rebindTarget?.port"></span>
+                被其他进程占用。将为其分配新的空闲端口
+                <span x-show="rebindTarget && rebindTarget.pid !== rebindTarget.our_pid"
+                      class="block mt-2 text-xs text-amber-600">
+                    占用者: PID <span class="font-mono" x-text="rebindTarget.pid"></span>
+                    <span x-text="rebindTarget.pid_name ? ' (' + rebindTarget.pid_name + ')' : ''"></span>
+                </span>
+            </p>
+            <div class="flex justify-end gap-3">
+                <button @click="rebindTarget = null"
+                        class="btn-secondary px-4 py-2 rounded-xl text-sm font-semibold text-stone-600 cursor-pointer">
+                    取消
+                </button>
+                <button @click="doRebind()"
+                        class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer">
+                    确认重新分配
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function ports() {
+    return {
+        rows: [],
+        lastUpdated: '',
+        rebindTarget: null,
+
+        async init() {
+            await this.fetchOverview();
+        },
+
+        async fetchOverview() {
+            try {
+                const r = await fetch('/api/ports/overview');
+                if (!r.ok) throw new Error('加载失败');
+                this.rows = await r.json();
+                const now = new Date();
+                this.lastUpdated = now.toLocaleTimeString();
+            } catch (e) {
+                showToast('加载端口状态失败: ' + e.message, 'error');
+            }
+        },
+
+        async checkRow(row) {
+            if (row.kind !== 'instance') {
+                // Manager port — just re-fetch the overview
+                await this.fetchOverview();
+                return;
+            }
+            try {
+                const r = await fetch(`/api/ports/${row.instance_id}/check`, {
+                    method: 'POST',
+                    headers: { 'X-CCCONVERT-CSRF': getCsrfToken() }
+                });
+                if (!r.ok) throw new Error('检查失败');
+                const data = await r.json();
+                // Merge the fresh result into the row
+                const idx = this.rows.findIndex(x => x.instance_id === row.instance_id);
+                if (idx >= 0) this.rows[idx] = { ...this.rows[idx], ...data };
+                showToast('端口检查完成', 'success');
+            } catch (e) {
+                showToast('检查失败: ' + e.message, 'error');
+            }
+        },
+
+        confirmRebind(row) {
+            this.rebindTarget = row;
+        },
+
+        async doRebind() {
+            if (!this.rebindTarget) return;
+            const row = this.rebindTarget;
+            this.rebindTarget = null;
+            try {
+                const r = await fetch(`/api/ports/${row.instance_id}/rebind`, {
+                    method: 'POST',
+                    headers: { 'X-CCCONVERT-CSRF': getCsrfToken() }
+                });
+                if (!r.ok) {
+                    const data = await r.json();
+                    throw new Error(data.detail || '重新分配失败');
+                }
+                const data = await r.json();
+                showToast(`端口已从 ${data.old_port} 迁移到 ${data.new_port}`, 'success');
+                await this.fetchOverview();
+            } catch (e) {
+                showToast('重新分配失败: ' + e.message, 'error');
+            }
+        },
+
+        inspectProcess(row) {
+            showToast(`占用端口 ${row.port} 的进程: PID ${row.pid} (${row.pid_name || '未知'})。可用 ccconvert stop 或系统任务管理器结束该进程。`, 'info');
+        },
+
+        countByStatus(status) {
+            return this.rows.filter(r => r.status === status).length;
+        },
+
+        statusLabel(status) {
+            const labels = { healthy: '健康', conflict: '冲突', down: '未监听', unknown: '未知' };
+            return labels[status] || status || '未知';
+        }
+    }
+}
+</script>
+{% endblock %}
