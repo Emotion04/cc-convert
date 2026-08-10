@@ -258,7 +258,27 @@ def create_manager_app(store, supervisor) -> FastAPI:
     Returns:
         Configured FastAPI application for the manager dashboard
     """
-    app = FastAPI(title="CC Convert Manager", version=__version__)
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Runs inside the uvicorn event loop: initialise the shared HTTP client
+        # and launch auto-start instances here so no other event loop is used.
+        sup = app.state.supervisor
+        await sup.ensure_client()
+        await sup.startup_all()
+        yield
+        await sup.shutdown_all()
+
+    # docs_url/redoc_url=None: the manager serves a custom docs page at /docs
+    # (see web/routes.py docs_page) instead of the default Swagger UI.
+    app = FastAPI(
+        title="CC Convert Manager",
+        version=__version__,
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+    )
 
     app.state.store = store
     app.state.supervisor = supervisor

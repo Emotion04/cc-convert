@@ -70,15 +70,12 @@ class TestRunManager:
             with patch("cc_convert.daemon_runner.InstanceSupervisor") as mock_sup:
                 with patch("cc_convert.daemon_runner.create_manager_app", return_value=mock_app) as mock_create_app:
                     with patch("cc_convert.daemon_runner.uvicorn.run") as mock_uvicorn:
-                        with patch.object(daemon_runner, "atexit"):
-                            with patch.object(daemon_runner, "_write_manager_pid"):
-                                with patch.object(daemon_runner, "_remove_manager_pid"):
-                                    with patch.object(daemon_runner, "asyncio") as mock_asyncio:
-                                        mock_asyncio.run.return_value = None
-                                        daemon_runner.run_manager()
+                        with patch.object(daemon_runner, "_write_manager_pid"):
+                            with patch.object(daemon_runner, "_remove_manager_pid"):
+                                daemon_runner.run_manager()
 
-                                        mock_create_app.assert_called_once_with(store, mock_sup.return_value)
-                                        mock_uvicorn.assert_called_once()
-                                        kwargs = mock_uvicorn.call_args.kwargs
-                                        assert kwargs["host"] == "127.0.0.1"
-                                        assert kwargs["port"] == 18400
+                                mock_create_app.assert_called_once_with(store, mock_sup.return_value)
+                                mock_uvicorn.assert_called_once()
+                                kwargs = mock_uvicorn.call_args.kwargs
+                                assert kwargs["host"] == "127.0.0.1"
+                                assert kwargs["port"] == 18400

@@ -766,3 +766,11 @@ class TestPageRoutes:
         response = client.get("/api-test")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/html")
+
+    def test_docs_page(self, client):
+        """GET /docs returns the custom API documentation page (not Swagger)."""
+        response = client.get("/docs")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert "CC Convert" in response.text
+        assert "POST /v1/messages" in response.text

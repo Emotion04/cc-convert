@@ -14,7 +14,7 @@ LABEL org.opencontainers.image.title="cc-convert" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.source="https://github.com/cc-convert/cc-convert" \
+      org.opencontainers.image.source="https://github.com/Emotion04/cc-convert" \
       org.opencontainers.image.license="Apache-2.0"
 
 # Set environment variables

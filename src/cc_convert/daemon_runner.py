@@ -7,11 +7,9 @@ Starts the CC Convert manager/dashboard app with InstanceSupervisor.
 Workers are managed by the supervisor, NOT spawned directly here.
 """
 
-import asyncio
 import atexit
 import logging
 import os
-import signal
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -90,38 +88,10 @@ def run_manager() -> None:
         # Store started_at in app state for uptime tracking
         app.state.started_at = datetime.now().timestamp()
 
-        # 5. On startup: launch auto-start instances
-        log_message("Starting auto-start instances...")
-
-        async def _startup() -> None:
-            await supervisor.startup_all()
-            running = supervisor.get_running_instances()
-            log_message(f"Auto-start complete: {len(running)} instance(s) running")
-
-        asyncio.run(_startup())
-
-        # 6. Register atexit handler to call supervisor.shutdown_all()
-        def _shutdown() -> None:
-            log_message("Shutting down all instances...")
-            try:
-                asyncio.run(supervisor.shutdown_all())
-                log_message("All instances stopped")
-            except Exception as e:
-                log_message(f"Error during shutdown: {e}")
-
-        atexit.register(_shutdown)
-
-        # 7. Handle termination signals for graceful shutdown
-        def _signal_handler(signum, frame) -> None:
-            sig_name = signal.Signals(signum).name
-            log_message(f"Received signal {sig_name}, shutting down...")
-            _shutdown()
-            sys.exit(0)
-
-        signal.signal(signal.SIGTERM, _signal_handler)
-        signal.signal(signal.SIGINT, _signal_handler)
-
-        # 8. Start uvicorn with the manager app on manager port
+        # 5. Start uvicorn. The FastAPI lifespan (see create_manager_app)
+        #    initialises the shared HTTP client and launches auto-start
+        #    instances in this event loop, and shuts them down gracefully on
+        #    exit — so no standalone asyncio.run() / atexit handling is needed.
         log_message(f"Starting manager dashboard on http://{manager_host}:{manager_port}")
         uvicorn.run(
             app,

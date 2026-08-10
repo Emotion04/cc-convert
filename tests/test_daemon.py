@@ -124,22 +124,41 @@ class TestLoadDaemonConfig:
 
 
 class TestIsProcessRunning:
-    """Tests for _is_process_running function."""
+    """Tests for _is_process_running function.
+
+    On Windows the check uses ``ctypes.OpenProcess`` (since ``os.kill(pid, 0)``
+    is unreliable there); on POSIX it uses ``os.kill``. Tests patch the
+    platform-appropriate call.
+    """
 
     def test_running_process(self):
         """Test checking a running process."""
-        with patch("os.kill", return_value=None):
-            assert daemon._is_process_running(12345) is True
+        if daemon.os.name == "nt":
+            with patch("ctypes.windll.kernel32.OpenProcess", return_value=0xABC):
+                assert daemon._is_process_running(12345) is True
+        else:
+            with patch("os.kill", return_value=None):
+                assert daemon._is_process_running(12345) is True
 
     def test_not_running_process(self):
         """Test checking a non-running process."""
-        with patch("os.kill", side_effect=OSError):
-            assert daemon._is_process_running(12345) is False
+        if daemon.os.name == "nt":
+            with patch("ctypes.windll.kernel32.OpenProcess", return_value=0):
+                assert daemon._is_process_running(12345) is False
+        else:
+            with patch("os.kill", side_effect=OSError):
+                assert daemon._is_process_running(12345) is False
 
     def test_process_lookup_error(self):
-        """Test checking a process that raises ProcessLookupError."""
-        with patch("os.kill", side_effect=ProcessLookupError):
-            assert daemon._is_process_running(12345) is False
+        """Test checking a process that raises ProcessLookupError (POSIX)."""
+        if daemon.os.name == "nt":
+            # Windows has no ProcessLookupError path — a NULL handle is the
+            # equivalent of "process is gone".
+            with patch("ctypes.windll.kernel32.OpenProcess", return_value=0):
+                assert daemon._is_process_running(12345) is False
+        else:
+            with patch("os.kill", side_effect=ProcessLookupError):
+                assert daemon._is_process_running(12345) is False
 
 
 class TestIsPortInUse:

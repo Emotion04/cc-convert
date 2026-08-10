@@ -44,9 +44,9 @@ dev = [
 ccconvert = "cc_convert.main:main"
 
 [project.urls]
-Homepage = "https://github.com/cc-convert/cc-convert"
-Repository = "https://github.com/cc-convert/cc-convert"
-Issues = "https://github.com/cc-convert/cc-convert/issues"
+Homepage = "https://github.com/Emotion04/cc-convert"
+Repository = "https://github.com/Emotion04/cc-convert"
+Issues = "https://github.com/Emotion04/cc-convert/issues"
 
 [build-system]
 requires = ["hatchling"]

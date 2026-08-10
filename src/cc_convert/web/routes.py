@@ -124,6 +124,12 @@ async def api_test_page(request: Request):
     return templates.TemplateResponse(request, "api_test.html")
 
 
+@web_router.get("/docs", response_class=HTMLResponse)
+async def docs_page(request: Request):
+    """Custom API documentation page (standalone layout, not base.html)."""
+    return templates.TemplateResponse(request, "docs.html")
+
+
 # ---------------------------------------------------------------------------
 # Instance CRUD
 # ---------------------------------------------------------------------------

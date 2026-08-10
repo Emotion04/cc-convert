@@ -155,7 +155,7 @@
             <div class="glass-card rounded-2xl p-6">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-sm font-bold text-stone-900">响应</h3>
-                    <div class="flex items-center gap-4" x-show="response">
+                    <div class="flex items-center gap-4" x-show="response" x-cloak>
                         <span class="badge"
                               :class="{
                                   'bg-teal-50 text-teal-600': response?.status >= 200 && response?.status < 300,
@@ -172,7 +172,7 @@
                 </div>
 
                 <!-- Response Tabs -->
-                <div x-show="response">
+                <div x-show="response" x-cloak>
                     <div class="flex gap-4 border-b border-stone-200 mb-4">
                         <button @click="responseTab = 'body'"
                                 class="pb-2.5 px-1 text-sm font-semibold transition cursor-pointer"
@@ -207,7 +207,7 @@
                 </div>
 
                 <!-- Loading -->
-                <div x-show="sending" class="text-center py-16">
+                <div x-show="sending" x-cloak class="text-center py-16">
                     <svg class="w-8 h-8 text-brand-400 mx-auto animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
                         <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>

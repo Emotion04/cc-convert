@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 文档 · CC Convert</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['DM Sans', 'system-ui', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        brand: { 50: '#FFF7ED', 100: '#FFEDD5', 200: '#FED7AA', 300: '#FDBA74', 400: '#FB923C', 500: '#F97316', 600: '#EA580C', 700: '#C2410C' },
+                        teal: { 50: '#F0FDFA', 100: '#CCFBF1', 200: '#99F6E4', 300: '#5EEAD4', 400: '#2DD4BF', 500: '#14B8A6', 600: '#0D9488' },
+                        stone: { 50: '#FAFAF9', 100: '#F5F5F4', 150: '#EEEEEC', 200: '#E7E5E4', 300: '#D6D3D1', 400: '#A8A29E', 500: '#78716C', 600: '#57534E', 700: '#44403C', 800: '#292524', 900: '#1C1917' },
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        body { background: #FAFAF9; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #D6D3D1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #A8A29E; }
+
+        .nav-link { transition: all 0.2s ease; border-radius: 10px; }
+        .nav-link:hover { background: rgba(249, 115, 22, 0.06); color: #EA580C; }
+        .nav-link.active { background: rgba(249, 115, 22, 0.08); color: #EA580C; font-weight: 600; }
+
+        .btn-primary { background: linear-gradient(135deg, #F97316 0%, #EA580C 100%); transition: all 0.2s ease; box-shadow: 0 2px 8px rgba(249, 115, 22, 0.25); }
+        .btn-primary:hover { box-shadow: 0 4px 16px rgba(249, 115, 22, 0.35); transform: translateY(-1px); }
+        .btn-secondary { background: white; border: 1px solid #E7E5E4; transition: all 0.2s ease; }
+        .btn-secondary:hover { background: #F5F5F4; border-color: #D6D3D1; }
+        .input-field { background: white; border: 1px solid #E7E5E4; transition: all 0.2s ease; }
+        .input-field:focus { border-color: #F97316; box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1); outline: none; }
+        .sidebar-gradient { background: linear-gradient(180deg, #FFFFFF 0%, #FAFAF9 100%); }
+
+        /* 代码块 */
+        .code-block {
+            background: #1C1917; color: #E7E5E4;
+            border-radius: 12px; padding: 16px 20px; overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.7;
+            margin-top: 0;
+        }
+        .code-wrap pre { border-top-left-radius: 0; border-top-right-radius: 0; }
+        .code-wrap .code-head {
+            background: #292524; border-radius: 12px 12px 0 0;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 16px;
+        }
+
+        /* HTTP 方法徽章 */
+        .method { display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .03em; }
+        .method-post { background: rgba(249, 115, 22, .12); color: #EA580C; }
+        .method-get { background: rgba(20, 184, 166, .12); color: #0D9488; }
+        .method-delete { background: rgba(220, 38, 38, .10); color: #DC2626; }
+        .method-patch { background: rgba(79, 70, 229, .10); color: #4F46E5; }
+
+        /* 文档正文排版 */
+        .docs-section h2 { margin-top: 3rem; margin-bottom: 1rem; font-size: 1.5rem; font-weight: 700; color: #1C1917; letter-spacing: -0.01em; }
+        .docs-section h3 { margin-top: 2rem; margin-bottom: .5rem; font-size: 1rem; font-weight: 600; color: #292524; }
+        .docs-section p { margin-bottom: 1rem; font-size: 14px; line-height: 1.8; color: #57534E; }
+        .docs-section ul, .docs-section ol { margin-bottom: 1rem; padding-left: 1.25rem; font-size: 14px; line-height: 1.8; color: #57534E; }
+        .docs-section ul { list-style: disc; }
+        .docs-section ol { list-style: decimal; }
+        .docs-section li { margin-bottom: .25rem; }
+        .docs-section code:not(.no-inline) {
+            background: #F5F5F4; border: 1px solid #E7E5E4; border-radius: 6px;
+            padding: 1px 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #C2410C;
+        }
+        .docs-section pre code { background: transparent; border: none; color: inherit; padding: 0; font-size: inherit; }
+        .docs-section table { width: 100%; font-size: 13px; }
+        .docs-section table th { text-align: left; font-size: 11px; font-weight: 600; color: #A8A29E; text-transform: uppercase; letter-spacing: .05em; padding-bottom: .5rem; }
+        .docs-section table td { padding: .65rem .5rem .65rem 0; color: #57534E; vertical-align: top; border-bottom: 1px solid #F5F5F4; }
+        .docs-section table tr:last-child td { border-bottom: none; }
+        .docs-section blockquote {
+            border-left: 3px solid #FDBA74; background: #FFF7ED; padding: .75rem 1rem;
+            border-radius: 0 8px 8px 0; font-size: 13px; color: #9A3412; margin-bottom: 1rem;
+        }
+        .docs-section blockquote code { background: rgba(249, 115, 22, .1); border-color: rgba(249, 115, 22, .2); color: #C2410C; }
+    </style>
+</head>
+<body class="min-h-screen font-sans text-stone-800" x-data="docNav()" x-init="init()">
+
+    <!-- 移动端顶栏 -->
+    <header class="lg:hidden sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-stone-200 px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center">
+                <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+            </span>
+            <span class="font-bold text-stone-900">CC Convert <span class="text-stone-400 font-normal text-xs">文档</span></span>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="/" class="btn-secondary px-3 py-1.5 rounded-lg text-xs font-semibold text-stone-600">返回仪表板</a>
+            <button @click="mobileOpen = !mobileOpen" class="btn-secondary p-2 rounded-lg cursor-pointer">
+                <svg class="w-4 h-4 text-stone-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- 移动端抽屉遮罩 -->
+    <div x-show="mobileOpen" @click="mobileOpen = false" x-cloak class="fixed inset-0 bg-stone-900/30 z-40 lg:hidden"></div>
+
+    <div class="flex">
+        <!-- 左侧目录 -->
+        <aside class="sidebar-gradient border-r border-stone-200 w-72 flex-shrink-0 fixed inset-y-0 left-0 z-50 lg:sticky lg:top-0 h-screen flex-col overflow-hidden transition-transform duration-300 lg:translate-x-0"
+               :class="mobileOpen ? 'translate-x-0' : '-translate-x-full'">
+            <!-- 顶部 logo -->
+            <div class="px-5 py-5 border-b border-stone-200 flex items-center gap-3">
+                <a href="/" class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-sm">
+                        <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+                    </div>
+                    <div>
+                        <h1 class="text-base font-bold text-stone-900 tracking-tight">CC Convert</h1>
+                        <p class="text-[10px] text-stone-400 font-mono">API 文档</p>
+                    </div>
+                </a>
+            </div>
+
+            <a href="/" class="mx-3 mt-3 btn-secondary rounded-xl px-4 py-2.5 text-sm font-semibold text-stone-600 inline-flex items-center gap-2">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                返回仪表板
+            </a>
+
+            <!-- 目录搜索 -->
+            <div class="px-4 mt-4">
+                <input type="text" x-model="filter" placeholder="过滤章节..."
+                       class="input-field w-full px-3.5 py-2 rounded-xl text-xs font-mono placeholder-stone-300">
+            </div>
+
+            <!-- 目录 -->
+            <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                <p class="px-3 py-2 text-[10px] font-semibold text-stone-400 uppercase tracking-widest">用户文档</p>
+                <template x-for="item in filteredUserDocs" :key="item.id">
+                    <a :href="'#' + item.id" @click.prevent="scrollTo(item.id)"
+                       class="nav-link flex items-center gap-2 px-3 py-2 text-sm text-stone-600"
+                       :class="{ 'active': activeId === item.id }">
+                        <span class="w-1 h-1 rounded-full bg-stone-300" :class="{ 'bg-brand-500': activeId === item.id }"></span>
+                        <span x-text="item.label"></span>
+                    </a>
+                </template>
+
+                <p class="px-3 pt-5 pb-2 text-[10px] font-semibold text-stone-400 uppercase tracking-widest">API 参考</p>
+                <template x-for="item in filteredApiDocs" :key="item.id">
+                    <a :href="'#' + item.id" @click.prevent="scrollTo(item.id)"
+                       class="nav-link flex items-center gap-2 px-3 py-2 text-sm text-stone-600"
+                       :class="{ 'active': activeId === item.id }">
+                        <span class="w-1 h-1 rounded-full bg-stone-300" :class="{ 'bg-brand-500': activeId === item.id }"></span>
+                        <span x-text="item.label"></span>
+                    </a>
+                </template>
+            </nav>
+
+            <div class="px-5 py-4 border-t border-stone-200 text-[11px] text-stone-400">v0.8.0 · Manager 本地文档</div>
+        </aside>
+
+        <!-- 右侧内容 -->
+        <main class="flex-1 min-w-0 bg-stone-50">
+            <div class="max-w-3xl mx-auto px-6 sm:px-8 lg:px-12 py-10 lg:py-16">
+
+                <!-- ============ 用户文档 ============ -->
+
+                <section id="overview" data-section class="docs-section scroll-mt-24">
+                    <h1 class="text-3xl font-bold text-stone-900 tracking-tight mb-3">CC Convert API 文档</h1>
+                    <p class="text-stone-500 leading-relaxed mb-6">Anthropic ↔ OpenAI 双向协议转换代理，让 Claude Code / Anthropic SDK 运行在任意 OpenAI 兼容后端上。</p>
+
+                    <h2>简介</h2>
+                    <p>CC Convert 是一个本地运行的协议转换代理。Claude Code（只认识 Anthropic Messages 协议）把请求发给 CC Convert，CC Convert 转换为 OpenAI 格式转发给上游（vLLM、SGLang、云 API），再把响应转回 Anthropic 格式。</p>
+
+                    <h2>工作原理</h2>
+                    <div class="bg-white border border-stone-200 rounded-xl p-4 mb-4 font-mono text-xs text-stone-600 overflow-x-auto">
+                        Claude Code ──→ CC Convert Worker (本地端口) ──→ 上游 API (OpenAI / Responses)
+                    </div>
+                    <p>一个 <strong>Manager</strong>（Dashboard + 生命周期管理）管理多个 <strong>Worker</strong>（每个实例一个独立进程、独立端口）。Supervisor 负责 Worker 的启停与健康检查。</p>
+
+                    <h2>三种运行模式</h2>
+                    <table>
+                        <thead><tr><th>端点</th><th>模式</th><th>用途</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>/v1/messages</code></td><td>Anthropic 代理</td><td>Claude Code 场景，Anthropic ↔ OpenAI 双向转换</td></tr>
+                            <tr><td><code>/v1/chat/completions</code></td><td>OpenAI 透传</td><td>OpenAI 客户端直连，零转换开销</td></tr>
+                            <tr><td><code>/v1/responses</code></td><td>Responses 桥接</td><td>OpenAI Responses SDK 对接只实现 chat/completions 的后端</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="quickstart" data-section class="docs-section scroll-mt-24">
+                    <h2>快速开始</h2>
+                    <h3>安装</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">bash</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>pip install cc-convert</code></pre>
+                    </div>
+                    <h3>启动 Manager</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">bash</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>ccconvert start</code></pre>
+                    </div>
+                    <p>启动后 Dashboard 地址：<code>http://127.0.0.1:&lt;manager-port&gt;</code>（默认 18400 起，实际以启动输出为准）。在 Dashboard 里创建实例，配置上游地址与密钥，即可开始使用。</p>
+                    <h3>最小请求示例</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">python</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://127.0.0.1:18401",  # 实例端口
+    api_key="local",                    # 实例未配 key 时透传
+)
+resp = client.messages.create(
+    model="my-model",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "你好！"}],
+)
+print(resp.content[0].text)</code></pre>
+                    </div>
+                </section>
+
+                <section id="install-cli" data-section class="docs-section scroll-mt-24">
+                    <h2>安装与启动 (CLI)</h2>
+                    <h3>常用命令</h3>
+                    <table>
+                        <thead><tr><th>命令</th><th>说明</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>ccconvert start</code></td><td>后台启动 Manager（可加 <code>--port</code> 指定端口）</td></tr>
+                            <tr><td><code>ccconvert stop</code></td><td>停止 Manager</td></tr>
+                            <tr><td><code>ccconvert stop -f</code></td><td>强制停止</td></tr>
+                            <tr><td><code>ccconvert restart</code></td><td>重启</td></tr>
+                            <tr><td><code>ccconvert status</code></td><td>查看 Manager 与实例状态</td></tr>
+                            <tr><td><code>ccconvert logs</code></td><td>查看日志（<code>-f</code> 跟随）</td></tr>
+                            <tr><td><code>ccconvert open</code></td><td>浏览器打开 Dashboard</td></tr>
+                            <tr><td><code>ccconvert --version</code></td><td>查看版本</td></tr>
+                        </tbody>
+                    </table>
+                    <h3>配置文件</h3>
+                    <p>配置文件位于 <code>~/.ccconvert/config.toml</code>（环境变量 <code>CCCONVERT_CONFIG_DIR</code> 可覆盖目录），首次运行自动创建。多实例配置由 Dashboard 管理，通常无需手改。</p>
+                </section>
+
+                <section id="claude-code" data-section class="docs-section scroll-mt-24">
+                    <h2>配合 Claude Code 使用</h2>
+                    <p>创建实例后，点击 Dashboard 卡片上的 <strong>复制配置</strong>，会得到环境变量或 <code>settings.json</code> 片段，填入 Claude Code 即可。</p>
+                    <h3>环境变量</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">bash</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>export ANTHROPIC_BASE_URL="http://127.0.0.1:18401"   # 实例端口，注意 http:// 前缀
+export ANTHROPIC_AUTH_TOKEN="local"</code></pre>
+                    </div>
+                    <h3>settings.json</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">json</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18401",
+    "ANTHROPIC_AUTH_TOKEN": "local",
+    "ANTHROPIC_MODEL": "my-model",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "my-model"
+  }
+}</code></pre>
+                    </div>
+                    <blockquote>启动 Claude Code 时显示的是它自己配置的模型名；CC Convert 会按 <code>target_model</code> 覆盖后发给上游，实际生效模型以 Dashboard 实例的 <code>目标模型</code> 为准。</blockquote>
+                </section>
+
+                <section id="instances" data-section class="docs-section scroll-mt-24">
+                    <h2>实例管理</h2>
+                    <p>每个实例是一个独立的代理进程，监听自己的端口，转换后转发到配置的上游。</p>
+                    <h3>实例字段</h3>
+                    <table>
+                        <thead><tr><th>字段</th><th>说明</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>name</code></td><td>实例名称</td></tr>
+                            <tr><td><code>port</code></td><td>本地端口（自动分配，从 18401 起）</td></tr>
+                            <tr><td><code>upstream_base_url</code></td><td>上游 API 地址，须以 <code>http://</code> 或 <code>https://</code> 开头</td></tr>
+                            <tr><td><code>upstream_api_key</code></td><td>上游密钥（仅写入，永不回显）</td></tr>
+                            <tr><td><code>target_model</code></td><td>目标模型：覆盖所有请求的模型名；留空则透传</td></tr>
+                            <tr><td><code>client_model</code> 等</td><td>Claude Code 模型注入（仅用于"复制配置"输出）</td></tr>
+                            <tr><td><code>upstream_format</code></td><td>上游协议格式（见"上游格式"节）</td></tr>
+                            <tr><td><code>auto_start</code></td><td>Manager 启动时自动拉起该实例</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="model-mapping" data-section class="docs-section scroll-mt-24">
+                    <h2>模型映射</h2>
+                    <p>每个请求的模型名都会经 <code>resolve_model()</code> 三级解析：</p>
+                    <ol>
+                        <li><strong>精确匹配</strong> <code>model_mapping</code> 规则</li>
+                        <li><strong>通配符匹配</strong>（<code>fnmatch</code>，如 <code>*opus*</code>）</li>
+                        <li><strong>回退</strong> 到实例的 <code>target_model</code>（空则透传原模型名）</li>
+                    </ol>
+                    <p>最常用的做法是只设置 <code>target_model</code>：一旦填写，所有请求的模型名都会被覆盖为该值，发给上游。适合"一个实例对应一个后端模型"的场景。</p>
+                </section>
+
+                <section id="upstream-format" data-section class="docs-section scroll-mt-24">
+                    <h2>上游格式</h2>
+                    <p>实例的 <code>upstream_format</code> 决定转发到上游的哪个端点：</p>
+                    <table>
+                        <thead><tr><th>值</th><th>转发到</th><th>适用后端</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>chat_completions</code></td><td><code>{base}/chat/completions</code></td><td>vLLM、SGLang、绝大多数 OpenAI 兼容后端</td></tr>
+                            <tr><td><code>responses</code></td><td><code>{base}/responses</code></td><td>实现 OpenAI Responses API 的后端</td></tr>
+                            <tr><td><code>auto</code>（默认）</td><td>启动时探测</td><td>先试 chat/completions，再试 responses，兜底 chat_completions</td></tr>
+                        </tbody>
+                    </table>
+                    <p>在 Dashboard 创建实例时可点"探测"按钮自动识别上游格式。</p>
+                </section>
+
+                <section id="auth" data-section class="docs-section scroll-mt-24">
+                    <h2>认证与密钥</h2>
+                    <h3>向上游的认证</h3>
+                    <p>转发请求到上游时，认证头按以下优先级生成：</p>
+                    <ol>
+                        <li>实例配置了 <code>upstream_api_key</code> → 用实例 key（<code>Authorization: Bearer &lt;key&gt;</code>）</li>
+                        <li>未配置 → <strong>透传</strong>客户端发来的 <code>Authorization</code> 头</li>
+                        <li>都没有 → 透传客户端的 <code>x-api-key</code> 头</li>
+                    </ol>
+                    <p>Claude Code 场景下，<code>ANTHROPIC_AUTH_TOKEN=local</code> 会被透传给上游。若上游是真实 API，需要把 <code>local</code> 换成上游认识的 token，或在实例里配置真实 key（推荐）。</p>
+                    <h3>Manager API 的安全</h3>
+                    <p>Manager 仅监听本机（Host 校验），写操作需要 <code>X-CCCONVERT-CSRF</code> 头（由页面自动附带）。密钥字段在 API 响应中永不回显，只暴露 <code>key_configured</code> 与 <code>key_last4</code>。</p>
+                </section>
+
+                <section id="web-search" data-section class="docs-section scroll-mt-24">
+                    <h2>服务端 Web Search</h2>
+                    <p>CC Convert 内置服务端搜索（Tavily / 通晓），任何模型都能获得联网能力，无需客户端改造。在全局配置中填入搜索提供方的 API key，并选择 <code>websearch_provider</code>（<code>tavily</code> / <code>tongxiao</code> / <code>both</code>）。</p>
+                    <p>Anthropic 端点通过 <code>tools: [{type: "web_search_20250305", ...}]</code> 触发；Responses 端点通过 <code>web_search</code> / <code>web_search_preview</code> 工具触发。搜索结果以 <code>server_tool_use</code> / <code>web_search_tool_result</code> 块返回。</p>
+                </section>
+
+                <section id="troubleshooting" data-section class="docs-section scroll-mt-24">
+                    <h2>故障排查</h2>
+                    <table>
+                        <thead><tr><th>症状</th><th>原因 / 解决</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>max_tokens is required</code></td><td>Anthropic 请求缺 <code>max_tokens</code>，必填</td></tr>
+                            <tr><td>上游 <code>4xx</code> / <code>5xx</code> 原样透出</td><td>上游返回的错误，检查实例 key / 模型名 / 上游状态</td></tr>
+                            <tr><td><code>401 Unauthorized / Invalid token</code></td><td>上游拒绝了认证：实例 key 无效，或透传的客户端 token 不被上游认可</td></tr>
+                            <tr><td><code>"... cannot be parsed as a URL"</code></td><td><code>ANTHROPIC_BASE_URL</code> 缺 <code>http://</code> 前缀</td></tr>
+                            <tr><td><code>Model X does not exist</code></td><td>模型名发到了不认识它的上游；检查 <code>target_model</code> 是否正确</td></tr>
+                            <tr><td>端口被占</td><td>Manager 自动找空闲端口并 evict 残留进程；到"端口管理"页查看</td></tr>
+                        </tbody>
+                    </table>
+                    <h3>查看日志</h3>
+                    <p>每个实例的日志在 <code>%LOCALAPPDATA%\ccconvert\instances\&lt;id&gt;\logs\</code>（Windows），或 Dashboard 的"日志查看"页。Manager 日志用 <code>ccconvert logs -f</code>。</p>
+                </section>
+
+                <!-- ============ API 参考 ============ -->
+
+                <section id="api-base" data-section class="docs-section scroll-mt-24">
+                    <h2>Base URL 与认证</h2>
+                    <p>所有代理 API 都挂在实例的本地端口上：<code>http://127.0.0.1:&lt;实例端口&gt;/v1/...</code>。实例端口在 Dashboard 卡片上显示，默认从 <code>18401</code> 起。</p>
+                    <h3>认证</h3>
+                    <p>请求头认证与"认证与密钥"节一致：实例配了 key 则代理用实例 key；否则透传客户端的 <code>Authorization</code> 或 <code>x-api-key</code>。Anthropic 客户端通常发送 <code>x-api-key</code>。</p>
+                </section>
+
+                <section id="api-messages" data-section class="docs-section scroll-mt-24">
+                    <h2 class="flex items-center gap-3">
+                        <span class="method method-post">POST</span>
+                        <code class="no-inline text-base font-mono text-stone-800">/v1/messages</code>
+                    </h2>
+                    <p>创建一条消息。<strong>Anthropic Messages 格式</strong>，代理自动转换为 OpenAI <code>chat/completions</code> 请求发给上游，再把上游响应转回 Anthropic 格式。支持流式（<code>stream: true</code>）、工具调用、视觉输入与 thinking 推理块。</p>
+
+                    <h3>请求参数</h3>
+                    <table>
+                        <thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>model</code></td><td>string</td><td style="color:#EA580C;font-weight:600">是</td><td>模型名，会经 <code>resolve_model()</code> 映射后发给上游</td></tr>
+                            <tr><td><code>messages</code></td><td>array</td><td style="color:#EA580C;font-weight:600">是</td><td><code>{role, content}</code>，content 可为字符串或内容块数组</td></tr>
+                            <tr><td><code>max_tokens</code></td><td>int</td><td style="color:#EA580C;font-weight:600">是</td><td>最大输出 token 数</td></tr>
+                            <tr><td><code>system</code></td><td>string / array</td><td>否</td><td>系统提示；自动去除 Claude Code billing header</td></tr>
+                            <tr><td><code>tools</code></td><td>array</td><td>否</td><td>工具定义；<code>web_search_20250305</code> 走服务端搜索</td></tr>
+                            <tr><td><code>tool_choice</code></td><td>object / string</td><td>否</td><td><code>auto</code> / <code>any</code> / <code>{type:"tool", name}</code></td></tr>
+                            <tr><td><code>stream</code></td><td>boolean</td><td>否</td><td>为 true 时返回 SSE 流</td></tr>
+                            <tr><td><code>thinking</code></td><td>object</td><td>否</td><td><code>{type:"enabled"/"adaptive", budget_tokens}</code>，映射到上游 <code>chat_template_kwargs</code></td></tr>
+                            <tr><td><code>temperature</code> / <code>top_p</code> / <code>top_k</code></td><td>number</td><td>否</td><td>采样参数</td></tr>
+                            <tr><td><code>stop_sequences</code></td><td>array</td><td>否</td><td>停止序列，映射为上游 <code>stop</code></td></tr>
+                            <tr><td><code>repetition_penalty</code></td><td>number</td><td>否</td><td>重复惩罚，透传</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>请求示例</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">bash</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>curl http://127.0.0.1:18401/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: local" \
+  -d '{
+    "model": "my-model",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "用一句话介绍自己"}
+    ]
+  }'</code></pre>
+                    </div>
+
+                    <h3>响应示例</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">json</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>{
+  "id": "chatcmpl-xxxx",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {"type": "text", "text": "你好！我是 CC Convert 代理后的模型。"}
+  ],
+  "model": "my-model",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 22,
+    "cache_creation_input_tokens": null,
+    "cache_read_input_tokens": null
+  }
+}</code></pre>
+                    </div>
+
+                    <h3>错误响应</h3>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">json</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>{
+  "type": "error",
+  "error": {
+    "type": "invalid_request_error",
+    "message": "max_tokens is required"
+  }
+}</code></pre>
+                    </div>
+                    <blockquote>流式模式返回 <code>text/event-stream</code>，事件序列：<code>message_start</code> → <code>content_block_start</code> → <code>content_block_delta</code> → <code>content_block_stop</code> → <code>message_delta</code> → <code>message_stop</code>。</blockquote>
+                </section>
+
+                <section id="api-chat-completions" data-section class="docs-section scroll-mt-24">
+                    <h2 class="flex items-center gap-3">
+                        <span class="method method-post">POST</span>
+                        <code class="no-inline text-base font-mono text-stone-800">/v1/chat/completions</code>
+                    </h2>
+                    <p>原样代理 OpenAI 格式请求到上游，<strong>不做任何转换</strong>（避免 Anthropic↔OpenAI 转换开销）。请求体为任意 OpenAI chat/completions 格式；响应原样返回上游 JSON，状态码透传。流式时 SSE 逐块透传。</p>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">python</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:18401/v1", api_key="local")
+resp = client.chat.completions.create(
+    model="my-model",
+    messages=[{"role": "user", "content": "hi"}],
+)
+print(resp.choices[0].message.content)</code></pre>
+                    </div>
+                </section>
+
+                <section id="api-responses" data-section class="docs-section scroll-mt-24">
+                    <h2 class="flex items-center gap-3">
+                        <span class="method method-post">POST</span>
+                        <code class="no-inline text-base font-mono text-stone-800">/v1/responses</code>
+                    </h2>
+                    <p>接收 OpenAI <strong>Responses</strong> 格式请求，转换为 <code>chat/completions</code> 发给只实现该协议的上游（vLLM、SGLang 等），再把上游响应转回 Responses 格式。让 OpenAI Responses SDK 客户端也能对接兼容后端。</p>
+                    <h3>请求字段</h3>
+                    <table>
+                        <thead><tr><th>参数</th><th>说明</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>model</code></td><td>必填，经 <code>resolve_model()</code> 映射</td></tr>
+                            <tr><td><code>input</code></td><td>字符串或 item 数组（message / function_call / function_call_output / reasoning）</td></tr>
+                            <tr><td><code>instructions</code></td><td>系统指令，作为 system 消息</td></tr>
+                            <tr><td><code>stream</code></td><td>bool，true 时返回 SSE 事件流</td></tr>
+                            <tr><td><code>max_output_tokens</code></td><td>int → OpenAI <code>max_tokens</code></td></tr>
+                            <tr><td><code>tools</code></td><td>function 工具转发；<code>web_search</code> 类走服务端搜索</td></tr>
+                            <tr><td><code>reasoning</code></td><td><code>{effort}</code> → <code>chat_template_kwargs.reasoning_effort</code></td></tr>
+                        </tbody>
+                    </table>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">python</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:18401/v1", api_key="local")
+resp = client.responses.create(
+    model="my-model",
+    input="你好",
+)
+print(resp.output_text)</code></pre>
+                    </div>
+                </section>
+
+                <section id="api-models" data-section class="docs-section scroll-mt-24">
+                    <h2 class="flex items-center gap-3">
+                        <span class="method method-get">GET</span>
+                        <code class="no-inline text-base font-mono text-stone-800">/v1/models</code>
+                    </h2>
+                    <p>列出上游可用的模型。<strong>直接代理转发</strong>到 <code>{上游 base_url}/models</code>，响应原样返回（OpenAI <code>list</code> 结构），不做转换。</p>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">bash</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>curl http://127.0.0.1:18401/v1/models -H "x-api-key: local"</code></pre>
+                    </div>
+                    <div class="relative code-wrap mb-4">
+                        <div class="code-head"><span class="text-[10px] font-mono text-stone-400">json</span><button class="text-[10px] text-stone-400 hover:text-stone-200 font-semibold cursor-pointer" onclick="copyCode(this)">复制</button></div>
+                        <pre class="code-block"><code>{
+  "object": "list",
+  "data": [
+    {"id": "my-model", "object": "model", "created": 1720000000, "owned_by": "vllm"}
+  ]
+}</code></pre>
+                    </div>
+                </section>
+
+                <section id="api-count-tokens" data-section class="docs-section scroll-mt-24">
+                    <h2 class="flex items-center gap-3">
+                        <span class="method method-post">POST</span>
+                        <code class="no-inline text-base font-mono text-stone-800">/v1/messages/count_tokens</code>
+                    </h2>
+                    <p>本地估算 token 数（用 <code>tiktoken</code> 的 <code>cl100k_base</code> 近似 Claude 模型）。请求体：<code>{messages, model, system, tools}</code>，返回 <code>{"input_tokens": &lt;int&gt;}</code>。</p>
+                </section>
+
+                <section id="api-health" data-section class="docs-section scroll-mt-24">
+                    <h2 class="flex items-center gap-3">
+                        <span class="method method-get">GET</span>
+                        <code class="no-inline text-base font-mono text-stone-800">/health</code>
+                    </h2>
+                    <p>健康检查，返回 <code>{"status": "healthy"}</code>。Docker 等场景用它判断服务存活。</p>
+                </section>
+
+                <section id="api-instances" data-section class="docs-section scroll-mt-24">
+                    <h2>Manager API · 实例 CRUD</h2>
+                    <p>以下 API 挂在 <strong>Manager</strong> 端口（Dashboard 同源），用于编程式管理实例。所有写操作需要 <code>X-CCCONVERT-CSRF</code> 头（从任意页面 meta 标签获取）。</p>
+                    <h3><span class="method method-get">GET</span> <code>/api/instances</code></h3>
+                    <p>列出全部实例（含实时状态）。密钥字段永不返回，只暴露 <code>key_configured</code> / <code>key_last4</code>。</p>
+                    <h3><span class="method method-post">POST</span> <code>/api/instances</code></h3>
+                    <p>创建实例。必填：<code>name</code>、<code>upstream_base_url</code>（须带协议头）、<code>upstream_api_key</code>。可选：<code>port</code>（缺省自动分配）、<code>target_model</code>、<code>client_model</code> 系列、<code>upstream_format</code>、<code>auto_start</code>。校验失败返回 422。</p>
+                    <h3><span class="method method-get">GET</span> <code>/api/instances/{id}</code></h3>
+                    <p>单个实例详情。</p>
+                    <h3><span class="method method-patch">PATCH</span> <code>/api/instances/{id}</code></h3>
+                    <p>部分更新。修改 <code>target_model</code> 等运行相关字段会触发 Worker 滚动重启（失败自动回滚）；仅改 <code>name</code> / <code>auto_start</code> / <code>client_*</code> 不重启。发送 <code>clear_upstream_api_key: true</code> 可清空密钥。</p>
+                    <h3><span class="method method-delete">DELETE</span> <code>/api/instances/{id}</code></h3>
+                    <p>删除实例，仅限已停止状态（运行中返回 409）。</p>
+                </section>
+
+                <section id="api-lifecycle" data-section class="docs-section scroll-mt-24">
+                    <h2>Manager API · 生命周期与监控</h2>
+                    <table>
+                        <thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead>
+                        <tbody>
+                            <tr><td><span class="method method-post">POST</span></td><td><code>/api/instances/{id}/start</code></td><td>启动实例</td></tr>
+                            <tr><td><span class="method method-post">POST</span></td><td><code>/api/instances/{id}/stop</code></td><td>停止实例</td></tr>
+                            <tr><td><span class="method method-post">POST</span></td><td><code>/api/instances/{id}/restart</code></td><td>重启实例</td></tr>
+                            <tr><td><span class="method method-get">GET</span></td><td><code>/api/instances/{id}/status</code></td><td>实时状态（status/pid/uptime/请求计数）</td></tr>
+                            <tr><td><span class="method method-get">GET</span></td><td><code>/api/instances/{id}/stats</code></td><td>请求统计（today_requests/errors/error_rate）</td></tr>
+                            <tr><td><span class="method method-get">GET</span></td><td><code>/api/instances/{id}/logs</code></td><td>日志（<code>?type=server</code> / <code>?lines=100</code>）</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section id="api-ports" data-section class="docs-section scroll-mt-24">
+                    <h2>Manager API · 端口与全局设置</h2>
+                    <table>
+                        <thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead>
+                        <tbody>
+                            <tr><td><span class="method method-post">POST</span></td><td><code>/api/ports/suggest</code></td><td>建议一个空闲端口</td></tr>
+                            <tr><td><span class="method method-post">POST</span></td><td><code>/api/detect-format</code></td><td>探测上游格式：<code>{url, key}</code> → <code>{format}</code></td></tr>
+                            <tr><td><span class="method method-get">GET</span></td><td><code>/api/ports/overview</code></td><td>端口健康汇总</td></tr>
+                            <tr><td><span class="method method-post">POST</span></td><td><code>/api/ports/{id}/rebind</code></td><td>换绑新空闲端口（运行中会重启）</td></tr>
+                            <tr><td><span class="method method-get">GET</span></td><td><code>/api/manager</code></td><td>Manager 状态（版本/pid/端口/实例数）</td></tr>
+                            <tr><td><span class="method method-get">GET</span></td><td><code>/api/global</code></td><td>全局设置（日志级别/超时/搜索配置等）</td></tr>
+                            <tr><td><span class="method method-patch">PATCH</span></td><td><code>/api/global</code></td><td>更新全局设置</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        window.DOC_SECTIONS = {
+            user: [
+                { id: 'overview', label: '简介与工作原理' },
+                { id: 'quickstart', label: '快速开始' },
+                { id: 'install-cli', label: '安装与启动 (CLI)' },
+                { id: 'claude-code', label: '配合 Claude Code 使用' },
+                { id: 'instances', label: '实例管理' },
+                { id: 'model-mapping', label: '模型映射' },
+                { id: 'upstream-format', label: '上游格式' },
+                { id: 'auth', label: '认证与密钥' },
+                { id: 'web-search', label: '服务端 Web Search' },
+                { id: 'troubleshooting', label: '故障排查' },
+            ],
+            api: [
+                { id: 'api-base', label: 'Base URL 与认证' },
+                { id: 'api-messages', label: 'POST /v1/messages' },
+                { id: 'api-chat-completions', label: 'POST /v1/chat/completions' },
+                { id: 'api-responses', label: 'POST /v1/responses' },
+                { id: 'api-models', label: 'GET /v1/models' },
+                { id: 'api-count-tokens', label: 'POST /v1/messages/count_tokens' },
+                { id: 'api-health', label: 'GET /health' },
+                { id: 'api-instances', label: 'Manager API · 实例 CRUD' },
+                { id: 'api-lifecycle', label: 'Manager API · 生命周期' },
+                { id: 'api-ports', label: 'Manager API · 端口与全局设置' },
+            ],
+        };
+
+        function docNav() {
+            return {
+                activeId: null,
+                mobileOpen: false,
+                filter: '',
+                sections: [],
+                observer: null,
+
+                get userDocs() { return window.DOC_SECTIONS.user; },
+                get apiDocs() { return window.DOC_SECTIONS.api; },
+
+                get filteredUserDocs() {
+                    const f = this.filter.trim().toLowerCase();
+                    return f ? this.userDocs.filter(i => i.label.toLowerCase().includes(f)) : this.userDocs;
+                },
+                get filteredApiDocs() {
+                    const f = this.filter.trim().toLowerCase();
+                    return f ? this.apiDocs.filter(i => (i.id + ' ' + i.label).toLowerCase().includes(f)) : this.apiDocs;
+                },
+
+                init() {
+                    this.sections = [...document.querySelectorAll('[data-section]')];
+                    this.observer = new IntersectionObserver((entries) => {
+                        for (const entry of entries) {
+                            if (entry.isIntersecting) this.activeId = entry.target.id;
+                        }
+                    }, { root: null, rootMargin: '-96px 0px -55% 0px', threshold: 0 });
+                    this.sections.forEach(s => this.observer.observe(s));
+
+                    if (location.hash) {
+                        const target = document.getElementById(location.hash.slice(1));
+                        if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth' }), 100);
+                    }
+                },
+
+                scrollTo(id) {
+                    this.activeId = id;
+                    this.mobileOpen = false;
+                    const el = document.getElementById(id);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    history.replaceState(null, '', '#' + id);
+                },
+            };
+        }
+
+        function copyCode(btn) {
+            const pre = btn.closest('.code-wrap').querySelector('pre');
+            const text = pre.innerText;
+            const done = () => {
+                const old = btn.textContent;
+                btn.textContent = '已复制';
+                setTimeout(() => btn.textContent = old, 1500);
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(pre, done));
+            } else {
+                fallbackCopy(pre, done);
+            }
+        }
+        function fallbackCopy(pre, done) {
+            const range = document.createRange();
+            range.selectNodeContents(pre);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+            try { document.execCommand('copy'); } catch (e) {}
+            sel.removeAllRanges();
+            done();
+        }
+    </script>
+</body>
+</html>

@@ -78,7 +78,21 @@ def _remove_daemon_config() -> None:
 
 
 def _is_process_running(pid: int) -> bool:
-    """Check if a process with given PID is running."""
+    """Check if a process with given PID is running (cross-platform).
+
+    ``os.kill(pid, 0)`` is unreliable on Windows (always reports the process
+    as gone), so query the process handle via ``OpenProcess`` there.
+    """
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
     try:
         os.kill(pid, 0)
         return True
@@ -343,8 +357,15 @@ def stop_daemon(force: bool = False) -> bool:
             if not force:
                 print("Manager did not stop gracefully, use -f to force kill", file=sys.stderr)
                 return False
-            # Force kill
-            os.kill(pid, signal.SIGKILL)
+            # Force kill — Windows has no SIGKILL, use taskkill /F.
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True,
+                    timeout=10,
+                )
+            else:
+                os.kill(pid, signal.SIGKILL)
             time.sleep(0.2)
 
         _remove_pid()

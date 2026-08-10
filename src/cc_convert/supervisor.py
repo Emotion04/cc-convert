@@ -132,6 +132,20 @@ class InstanceSupervisor:
         self._processes: dict[str, subprocess.Popen] = {}
         self._store = store
         self._runtime_dir = runtime_dir
+        # Shared HTTP client for local health probes, created lazily inside
+        # the event loop that actually uses it. Creating a fresh
+        # httpx.AsyncClient per request is slow on Windows (~0.75s each) and a
+        # client created in one event loop cannot be reused in another, so it
+        # must be created once inside the uvicorn loop (see ensure_client).
+        self._client: httpx.AsyncClient | None = None
+
+    async def ensure_client(self) -> httpx.AsyncClient:
+        """Return the shared HTTP client, creating it in the current event loop."""
+        if self._client is None or self._client.is_closed:
+            # trust_env=False keeps the local health probe off any system HTTP
+            # proxy (Clash etc.), which would otherwise stall it.
+            self._client = httpx.AsyncClient(timeout=2, trust_env=False)
+        return self._client
 
     # ------------------------------------------------------------------
     # Instance lifecycle
@@ -235,42 +249,42 @@ class InstanceSupervisor:
         #    times at 200 ms intervals (~12s) — cold start on Windows can
         #    exceed a few seconds. trust_env=False keeps the health probe off
         #    any system HTTP proxy (Clash etc.).
-        async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
-            for _ in range(60):
-                # If process exited early, bail immediately.
-                if proc.poll() is not None:
-                    stderr_tail = ""
-                    try:
-                        if proc.stderr is not None:
-                            stderr_tail = proc.stderr.read().decode("utf-8", errors="replace")[-500:]
-                    except Exception:
-                        pass
-                    logging.error(
-                        "Worker for %s exited early (rc=%s) on port %s: %s",
-                        instance.id, proc.returncode, instance.port, stderr_tail,
-                    )
-                    self._terminate_process(proc)
-                    return False
-
+        client = await self.ensure_client()
+        for _ in range(60):
+            # If process exited early, bail immediately.
+            if proc.poll() is not None:
+                stderr_tail = ""
                 try:
-                    resp = await client.get(
-                        f"http://127.0.0.1:{instance.port}/_ccconvert/status",
-                        headers={"Authorization": f"Bearer {internal_token}"},
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if (
-                            data.get("instance_id") == instance.id
-                            and data.get("revision") == self._store.revision
-                        ):
-                            # 8. Success -- store handle, write meta.
-                            self._processes[instance.id] = proc
-                            self._write_instance_meta(instance, proc.pid, internal_token)
-                            return True
-                except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError) as e:
-                    logging.debug("health poll %s: %r", instance.port, e)
+                    if proc.stderr is not None:
+                        stderr_tail = proc.stderr.read().decode("utf-8", errors="replace")[-500:]
+                except Exception:
                     pass
-                await asyncio.sleep(0.2)
+                logging.error(
+                    "Worker for %s exited early (rc=%s) on port %s: %s",
+                    instance.id, proc.returncode, instance.port, stderr_tail,
+                )
+                self._terminate_process(proc)
+                return False
+
+            try:
+                resp = await client.get(
+                    f"http://127.0.0.1:{instance.port}/_ccconvert/status",
+                    headers={"Authorization": f"Bearer {internal_token}"},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if (
+                        data.get("instance_id") == instance.id
+                        and data.get("revision") == self._store.revision
+                    ):
+                        # 8. Success -- store handle, write meta.
+                        self._processes[instance.id] = proc
+                        self._write_instance_meta(instance, proc.pid, internal_token)
+                        return True
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError) as e:
+                logging.debug("health poll %s: %r", instance.port, e)
+                pass
+            await asyncio.sleep(0.2)
 
         # 9. Health check failed -- tear down.
         self._terminate_process(proc)
@@ -434,16 +448,19 @@ class InstanceSupervisor:
             token = meta.get("internal_token", "") if meta else ""
 
             if port:
-                async with httpx.AsyncClient(timeout=2) as client:
-                    try:
-                        resp = await client.get(
-                            f"http://127.0.0.1:{port}/_ccconvert/status",
-                            headers={"Authorization": f"Bearer {token}"},
-                        )
-                        if resp.status_code == 200:
-                            return resp.json()
-                    except (httpx.ConnectError, httpx.TimeoutException):
-                        pass
+                # trust_env=False keeps the local health probe off any system
+                # HTTP proxy (Clash etc.); reuse the shared client to avoid the
+                # ~0.75s cost of creating a fresh httpx.AsyncClient on Windows.
+                client = await self.ensure_client()
+                try:
+                    resp = await client.get(
+                        f"http://127.0.0.1:{port}/_ccconvert/status",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    if resp.status_code == 200:
+                        return resp.json()
+                except (httpx.ConnectError, httpx.TimeoutException):
+                    pass
 
             # Fallback: process exists but we couldn't reach it.
             return {
@@ -508,6 +525,9 @@ class InstanceSupervisor:
         for inst_id in list(self._processes.keys()):
             await self.stop_instance(inst_id)
         self._processes.clear()
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
 
     def get_running_instances(self) -> list[str]:
         """Return list of instance IDs with live process handles."""
