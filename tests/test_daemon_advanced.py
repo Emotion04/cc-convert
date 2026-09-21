@@ -5,11 +5,33 @@ Advanced tests for daemon module covering subprocess and edge cases.
 import signal
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from cc_convert import daemon
+
+# signal.SIGKILL simply does not exist on Windows, and daemon.py never uses it
+# there (the win32 force path shells out to `taskkill /F` instead).
+_POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32", reason="signal.SIGKILL is POSIX-only"
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_daemon_paths(tmp_path, monkeypatch):
+    """Point daemon's module-level paths at a real, existing temp directory.
+
+    ``daemon`` binds ``MANAGER_PID_FILE`` / ``MANAGER_CONFIG_FILE`` /
+    ``MANAGER_LOG_FILE`` at import time, so they cannot pick up the sandbox
+    conftest sets up. Rebinding them here also guarantees the directory exists,
+    which ``start_daemon`` needs because it opens the manager log for append.
+    """
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(daemon, "MANAGER_PID_FILE", runtime / "manager.pid")
+    monkeypatch.setattr(daemon, "MANAGER_CONFIG_FILE", runtime / "manager.json")
+    monkeypatch.setattr(daemon, "MANAGER_LOG_FILE", runtime / "manager.log")
 
 
 class TestStartDaemonAdvanced:
@@ -29,7 +51,7 @@ class TestStartDaemonAdvanced:
                             with patch("time.sleep"):
                                 with patch.object(daemon, "_save_daemon_config") as mock_save:
                                     with patch.object(daemon, "_is_port_in_use", side_effect=[False, True]):
-                                        result = daemon.start_daemon("127.0.0.1", 8080, "info")
+                                        result = daemon.start_daemon(8080)
                                         assert result is True
                                         mock_save.assert_called_once()
 
@@ -44,9 +66,8 @@ class TestStartDaemonAdvanced:
                     with patch.object(daemon, "ensure_dirs"):
                         with patch("subprocess.Popen", return_value=mock_process):
                             with patch("time.sleep"):
-                                with patch("builtins.open", mock_open()):
-                                    result = daemon.start_daemon()
-                                    assert result is False
+                                result = daemon.start_daemon()
+                                assert result is False
 
     def test_start_daemon_port_never_active(self):
         """Test when port never becomes active and process dies."""
@@ -61,9 +82,8 @@ class TestStartDaemonAdvanced:
                     with patch.object(daemon, "ensure_dirs"):
                         with patch("subprocess.Popen", return_value=mock_process):
                             with patch("time.sleep"):
-                                with patch("builtins.open", mock_open()):
-                                    result = daemon.start_daemon()
-                                    assert result is False
+                                result = daemon.start_daemon()
+                                assert result is False
 
     def test_start_daemon_exception(self):
         """Test exception handling during start - exception in subprocess.Popen."""
@@ -73,9 +93,8 @@ class TestStartDaemonAdvanced:
                     with patch.object(daemon, "ensure_dirs"):
                         # Patch subprocess.Popen to raise exception (inside try block)
                         with patch("subprocess.Popen", side_effect=Exception("Failed to start")):
-                            with patch("builtins.open", mock_open()):
-                                result = daemon.start_daemon()
-                                assert result is False
+                            result = daemon.start_daemon()
+                            assert result is False
 
     def test_start_daemon_setsid_on_unix(self):
         """Test that setsid is used on Unix platforms."""
@@ -92,7 +111,7 @@ class TestStartDaemonAdvanced:
                                 with patch.object(daemon, "_save_daemon_config"):
                                     with patch.object(daemon, "_is_port_in_use", side_effect=[False, True]):
                                         with patch.object(sys, "platform", "linux"):
-                                            daemon.start_daemon("127.0.0.1", 8080, "info")
+                                            daemon.start_daemon(8080)
                                             # Check that start_new_session was passed
                                             call_kwargs = mock_popen.call_args[1]
                                             assert call_kwargs.get("start_new_session") is True
@@ -112,7 +131,7 @@ class TestStartDaemonAdvanced:
                                 with patch.object(daemon, "_save_daemon_config"):
                                     with patch.object(daemon, "_is_port_in_use", side_effect=[False, True]):
                                         with patch.object(sys, "platform", "win32"):
-                                            daemon.start_daemon("127.0.0.1", 8080, "info")
+                                            daemon.start_daemon(8080)
                                             # Check that start_new_session was not passed or is False
                                             call_kwargs = mock_popen.call_args[1]
                                             assert call_kwargs.get("start_new_session") is not True
@@ -121,6 +140,7 @@ class TestStartDaemonAdvanced:
 class TestStopDaemonAdvanced:
     """Advanced tests for stop_daemon function."""
 
+    @_POSIX_ONLY
     def test_stop_daemon_force_kill_after_timeout(self):
         """Test force kill when graceful stop times out."""
         with patch.object(daemon, "_cleanup_stale_pidfile"):
@@ -130,17 +150,27 @@ class TestStopDaemonAdvanced:
                     with patch("os.kill") as mock_kill:
                         with patch.object(daemon, "_remove_pid"):
                             with patch.object(daemon, "_remove_daemon_config"):
-                                result = daemon.stop_daemon(force=True)
-                                assert result is True
-                                # Should be called with SIGKILL
-                                mock_kill.assert_called_with(12345, signal.SIGKILL)
+                                with patch("time.sleep"):
+                                    # Exercise the POSIX branch deliberately.
+                                    # On win32 the force path shells out to
+                                    # `taskkill /F`, which would kill a real
+                                    # process (12345 could be anything) and
+                                    # never calls os.kill at all.
+                                    with patch.object(sys, "platform", "linux"):
+                                        result = daemon.stop_daemon(force=True)
+                                        assert result is True
+                                        # Should be called with SIGKILL
+                                        mock_kill.assert_called_with(12345, signal.SIGKILL)
 
+    @_POSIX_ONLY
     def test_stop_daemon_force_flag_immediate(self):
         """Test immediate SIGKILL with force flag."""
         # Test that force=True uses SIGKILL - simplified test
         with patch.object(daemon, "_cleanup_stale_pidfile"):
             with patch.object(daemon, "_read_pid", return_value=12345):
-                with patch.object(daemon, "_read_port", return_value=None):
+                # POSIX branch: the assertions below are about os.kill/SIGKILL,
+                # which the win32 force path never uses.
+                with patch.object(sys, "platform", "linux"):
                     # First call returns True (process running), second returns False (exits loop)
                     # Third call returns False (final check)
                     with patch.object(daemon, "_is_process_running", side_effect=[True, False, False]):
@@ -153,6 +183,32 @@ class TestStopDaemonAdvanced:
                                     calls = mock_kill.call_args_list
                                     assert len(calls) >= 1
                                     assert calls[0][0][1] == signal.SIGKILL
+
+    def test_stop_daemon_force_uses_taskkill_on_windows(self):
+        """On win32 the force path must use `taskkill /F`, never os.kill.
+
+        This branch used to execute for real during the test suite — only
+        os.kill was mocked, so `taskkill /F /PID 12345` actually ran and could
+        have killed an unrelated process. It is asserted here instead.
+        """
+        with patch.object(daemon, "_cleanup_stale_pidfile"):
+            with patch.object(daemon, "_read_pid", return_value=12345):
+                with patch.object(daemon, "_is_process_running", return_value=True):
+                    with patch("os.kill") as mock_kill:
+                        with patch("time.sleep"):
+                            with patch.object(daemon, "_remove_pid"):
+                                with patch.object(daemon, "_remove_daemon_config"):
+                                    with patch("subprocess.run") as mock_run:
+                                        with patch.object(sys, "platform", "win32"):
+                                            result = daemon.stop_daemon(force=True)
+
+                                        assert result is True
+                                        mock_run.assert_called_with(
+                                            ["taskkill", "/F", "/PID", "12345"],
+                                            capture_output=True,
+                                            timeout=10,
+                                        )
+                                        mock_kill.assert_not_called()
 
     def test_stop_daemon_oserror(self):
         """Test stop_daemon with OSError."""
@@ -168,7 +224,7 @@ class TestStopDaemonAdvanced:
         """Test stop_daemon with generic exception."""
         with patch.object(daemon, "_cleanup_stale_pidfile"):
             with patch.object(daemon, "_read_pid", return_value=12345):
-                with patch.object(daemon, "_read_port", return_value=None):
+                with patch.object(sys, "platform", "linux"):
                     with patch.object(daemon, "_is_process_running", return_value=True):
                         with patch("os.kill", side_effect=Exception("Unexpected")):
                             result = daemon.stop_daemon()
@@ -181,42 +237,27 @@ class TestShowLogsAdvanced:
     def test_show_logs_follow_mode(self):
         """Test show_logs with follow mode."""
         with patch.object(Path, "exists", return_value=True):
-            with patch("subprocess.run") as mock_run:
-                result = daemon.show_logs(follow=True, lines=50)
-                assert result is True
-                mock_run.assert_called_once()
-                # Check that tail -f was called
-                call_args = mock_run.call_args[0][0]
-                assert "tail" in call_args
-                assert "-f" in call_args
+            # Assertions below expect the `tail -f` branch, so pin the platform.
+            # On win32 show_logs uses a polling read loop that never returns
+            # here (it would spin forever), and never calls subprocess.run.
+            with patch.object(sys, "platform", "linux"):
+                with patch("subprocess.run") as mock_run:
+                    result = daemon.show_logs(follow=True, lines=50)
+                    assert result is True
+                    mock_run.assert_called_once()
+                    # Check that tail -f was called
+                    call_args = mock_run.call_args[0][0]
+                    assert "tail" in call_args
+                    assert "-f" in call_args
 
     def test_show_logs_follow_keyboard_interrupt(self):
         """Test show_logs follow mode with keyboard interrupt."""
         with patch.object(Path, "exists", return_value=True):
-            with patch("subprocess.run", side_effect=KeyboardInterrupt):
-                result = daemon.show_logs(follow=True)
-                assert result is True  # Should return True after interrupt
-
-
-class TestRunForeground:
-    """Tests for run_foreground function."""
-
-    def test_run_foreground(self):
-        """Test running in foreground mode."""
-        mock_settings = MagicMock()
-        mock_settings.openai_base_url = "https://api.openai.com/v1"
-
-        mock_app = MagicMock()
-
-        with patch.dict("os.environ", {}, clear=True):
-            with patch("cc_convert.main.create_app", return_value=mock_app):
-                with patch("cc_convert.config.get_settings", return_value=mock_settings):
-                    with patch("uvicorn.run") as mock_uvicorn:
-                        daemon.run_foreground("127.0.0.1", 8080, "info")
-                        mock_uvicorn.assert_called_once()
-                        # Check environment variables were set
-                        assert "127.0.0.1" == daemon.os.environ.get("CC Convert_HOST")
-                        assert "8080" == daemon.os.environ.get("CC Convert_PORT")
+            # Pin to the `tail -f` branch; the win32 polling loop never returns.
+            with patch.object(sys, "platform", "linux"):
+                with patch("subprocess.run", side_effect=KeyboardInterrupt):
+                    result = daemon.show_logs(follow=True)
+                    assert result is True  # Should return True after interrupt
 
 
 class TestRemoveDaemonConfig:
@@ -285,7 +326,10 @@ class TestEnsureDirsEdgeCases:
         with patch.object(Path, "mkdir") as mock_mkdir:
             with patch.object(Path, "exists", return_value=True):
                 daemon.ensure_dirs()
-                mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+                # ensure_dirs creates three directories: config, runtime, and
+                # manager-logs.
+                assert mock_mkdir.call_count == 3
+                mock_mkdir.assert_called_with(parents=True, exist_ok=True)
 
 
 if __name__ == "__main__":

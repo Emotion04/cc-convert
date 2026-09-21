@@ -30,11 +30,26 @@ class TestConfigFile:
             "cc_convert.runtime_paths.get_config_dir", lambda: mock_dir
         )
 
-    def test_get_config_dir(self):
-        """Test getting config directory."""
+    def test_get_config_dir(self, monkeypatch):
+        """Test getting config directory when no override is set."""
+        # The test session sets CCCONVERT_CONFIG_DIR to a sandbox; clear it so
+        # this asserts the documented default rather than the sandbox path.
+        monkeypatch.delenv("CCCONVERT_CONFIG_DIR", raising=False)
+
         config_dir = get_config_dir()
         assert isinstance(config_dir, Path)
         assert config_dir.name == ".ccconvert"
+
+    def test_get_config_dir_respects_override(self, monkeypatch, tmp_path):
+        """CCCONVERT_CONFIG_DIR must actually redirect the config directory.
+
+        Regression guard: the profile store used to consult its own variable
+        named "CC Convert_CONFIG_DIR" (with a space), so this documented
+        override was silently ignored and the config file could not be moved.
+        """
+        monkeypatch.setenv("CCCONVERT_CONFIG_DIR", str(tmp_path))
+
+        assert get_config_dir() == tmp_path
 
     def test_get_config_file(self):
         """Test getting config file path."""
