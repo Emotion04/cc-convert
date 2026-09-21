@@ -32,12 +32,16 @@ def get_config_file() -> Path:
 def get_runtime_dir() -> Path:
     """Get platform-specific runtime data directory.
 
+    Respects the ``CCCONVERT_RUNTIME_DIR`` environment variable.
     Windows: %LOCALAPPDATA%\\ccconvert
     POSIX:   ~/.local/share/ccconvert
 
     Returns:
         Path to the runtime data directory
     """
+    override = os.environ.get("CCCONVERT_RUNTIME_DIR")
+    if override:
+        return Path(override)
     if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:

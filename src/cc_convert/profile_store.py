@@ -13,7 +13,8 @@ from uuid import uuid4
 import tomli_w
 from pydantic import BaseModel, Field, field_validator
 
-from cc_convert.config import load_config_from_file, Settings
+from cc_convert.config import load_config_from_file
+from cc_convert.runtime_paths import get_config_dir, get_config_file
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -56,24 +57,24 @@ def mask_api_key(key: Optional[str]) -> Optional[str]:
     elif key:
         return "***"
     return None
-    if key and len(key) > 4:
-        return "***" + key[-4:]
-    elif key:
-        return "***"
-    return None
 
 
 def _get_config_dir() -> Path:
-    """Return the config directory, respecting the ``CC Convert_CONFIG_DIR`` env var."""
-    override = os.environ.get("CC Convert_CONFIG_DIR")
-    if override:
-        return Path(override)
-    return Path.home() / ".ccconvert"
+    """Return the config directory.
+
+    Delegates to :func:`cc_convert.runtime_paths.get_config_dir` so the
+    documented ``CCCONVERT_CONFIG_DIR`` override applies to the profile store
+    too. This previously consulted its own variable named
+    ``"CC Convert_CONFIG_DIR"`` — with a space, leftover from an earlier
+    rename — which nothing ever set, so the override was silently ignored
+    and the config file could not be relocated.
+    """
+    return get_config_dir()
 
 
 def _get_config_path() -> Path:
     """Return the default config file path (``<config_dir>/config.toml``)."""
-    return _get_config_dir() / "config.toml"
+    return get_config_file()
 
 
 class InstanceProfile(BaseModel):
@@ -227,12 +228,17 @@ def migrate_v1_then_load(config_path: Path) -> ProfileStore:
     config_dir = config_path.parent
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    # Read v1 TOML from config_path, fall back to default location if missing
+    # Read v1 TOML from config_path; fall back to the default location only
+    # when this *is* the default location. Falling back unconditionally meant
+    # that a caller passing an explicit, not-yet-existing path would silently
+    # migrate whatever the ambient default file happened to contain.
     if config_path.exists():
         with open(config_path, "rb") as f:
             raw = tomllib.load(f)
-    else:
+    elif config_path == get_config_file():
         raw = load_config_from_file()
+    else:
+        raw = {}
 
     original_exists = bool(raw)
     bak_path: Optional[Path] = None
