@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -133,6 +134,21 @@ def _is_process_running(pid: int) -> bool:
         return False
 
 
+def _force_kill(pid: int) -> None:
+    """Forcefully terminate *pid*.
+
+    Windows has no SIGKILL, so it shells out to ``taskkill /F`` there.
+    """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid)],
+            capture_output=True,
+            timeout=10,
+        )
+    else:
+        os.kill(pid, signal.SIGKILL)
+
+
 def _is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
     """Check if a TCP port is already in use."""
     try:
@@ -212,6 +228,26 @@ def _find_free_port_from(start: int, exclude: Optional[set[int]] = None) -> Opti
         if _can_bind(port, "127.0.0.1") and _can_bind(port, "0.0.0.0"):
             return port
     return None
+
+
+#: Appears in the manager dashboard's HTML; identifies the service on a port.
+_MANAGER_MARKER = "CC Convert Manager"
+
+
+def _looks_like_manager(port: int, host: str = "127.0.0.1") -> bool:
+    """Return True if *port* is serving the CC Convert manager dashboard.
+
+    Checked before terminating a process that was located *by port*, so an
+    unrelated program which merely happens to hold the configured port is not
+    killed. A process found through the pidfile is trusted already — that file
+    is ours — but a port match alone proves nothing about ownership.
+    """
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/", timeout=3) as response:
+            body = response.read(65536).decode("utf-8", "ignore")
+    except Exception:
+        return False
+    return _MANAGER_MARKER in body
 
 
 def _cleanup_stale_pidfile() -> None:
@@ -365,9 +401,20 @@ def stop_daemon(force: bool = False) -> bool:
         if configured_port and _is_port_in_use(configured_port):
             found = _find_pid_by_port(configured_port)
             if found is not None:
+                # A port match alone does not mean the process is ours — some
+                # unrelated program may simply hold the same port. Verify
+                # before force-killing anything.
+                if not _looks_like_manager(configured_port):
+                    print(
+                        f"Port {configured_port} is held by PID {found}, which "
+                        f"does not appear to be a CC Convert manager. Refusing "
+                        f"to stop it.",
+                        file=sys.stderr,
+                    )
+                    return False
                 print(
-                    f"Found orphaned process (PID {found}) holding port "
-                    f"{configured_port}, stopping it...",
+                    f"Found orphaned CC Convert manager (PID {found}) holding "
+                    f"port {configured_port}, stopping it...",
                     file=sys.stderr,
                 )
                 pid = found
@@ -380,18 +427,10 @@ def stop_daemon(force: bool = False) -> bool:
 
     try:
         # Send signal. Windows has no SIGKILL — use taskkill /F for force.
-        if sys.platform == "win32":
-            if force:
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=10,
-                )
-            else:
-                os.kill(pid, signal.SIGTERM)
+        if force:
+            _force_kill(pid)
         else:
-            signal_num = signal.SIGKILL if force else signal.SIGTERM
-            os.kill(pid, signal_num)
+            os.kill(pid, signal.SIGTERM)
 
         # Wait for process to terminate
         for _ in range(50):  # Wait up to 5 seconds
@@ -403,16 +442,21 @@ def stop_daemon(force: bool = False) -> bool:
             if not force:
                 print("Manager did not stop gracefully, use -f to force kill", file=sys.stderr)
                 return False
-            # Force kill — Windows has no SIGKILL, use taskkill /F.
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=10,
+            _force_kill(pid)
+            for _ in range(50):
+                if not _is_process_running(pid):
+                    break
+                time.sleep(0.1)
+            if _is_process_running(pid):
+                # Do not claim success and do not delete the pidfile: the
+                # process is still alive and still owns it. Reporting success
+                # here made a failed stop look like a clean one and destroyed
+                # the only record of the surviving process.
+                print(
+                    f"Failed to stop the manager (PID {pid}) — it is still running.",
+                    file=sys.stderr,
                 )
-            else:
-                os.kill(pid, signal.SIGKILL)
-            time.sleep(0.2)
+                return False
 
         _remove_pid()
         _remove_daemon_config()

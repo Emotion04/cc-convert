@@ -196,7 +196,11 @@ class TestStopDaemonAdvanced:
         """
         with patch.object(daemon, "_cleanup_stale_pidfile"):
             with patch.object(daemon, "_read_pid", return_value=12345):
-                with patch.object(daemon, "_is_process_running", return_value=True):
+                # Alive during the stale-pidfile check, gone by the first
+                # wait-loop iteration (the kill worked).
+                with patch.object(
+                    daemon, "_is_process_running", side_effect=[True, False, False]
+                ):
                     with patch("os.kill") as mock_kill:
                         with patch("time.sleep"):
                             with patch.object(daemon, "_remove_pid"):
@@ -212,6 +216,48 @@ class TestStopDaemonAdvanced:
                                             timeout=10,
                                         )
                                         mock_kill.assert_not_called()
+
+    def test_stop_daemon_reports_failure_when_process_survives(self):
+        """A stop that does not actually stop anything must not report success.
+
+        The force-kill path used to delete the pidfile and return True without
+        checking whether the process had died, so a failed stop looked like a
+        clean one *and* destroyed the only record of the surviving process.
+        """
+        with patch.object(daemon, "_cleanup_stale_pidfile"):
+            with patch.object(daemon, "_read_pid", return_value=12345):
+                with patch.object(daemon, "_is_process_running", return_value=True):
+                    with patch("os.kill"):
+                        with patch("time.sleep"):
+                            with patch.object(daemon, "_remove_pid") as mock_rm_pid:
+                                with patch.object(
+                                    daemon, "_remove_daemon_config"
+                                ) as mock_rm_cfg:
+                                    with patch("subprocess.run"):
+                                        with patch.object(sys, "platform", "win32"):
+                                            result = daemon.stop_daemon(force=True)
+
+                                        assert result is False
+                                        # The pidfile is the only record of the
+                                        # process still holding the port.
+                                        mock_rm_pid.assert_not_called()
+                                        mock_rm_cfg.assert_not_called()
+
+    def test_stop_daemon_refuses_to_kill_unrelated_port_holder(self):
+        """A process found only by port must be verified before being killed."""
+        with patch.object(daemon, "_cleanup_stale_pidfile"):
+            with patch.object(daemon, "_read_pid", return_value=None):
+                with patch.object(daemon, "_load_daemon_config", return_value={"port": 18400}):
+                    with patch.object(daemon, "_is_port_in_use", return_value=True):
+                        with patch.object(daemon, "_find_pid_by_port", return_value=999):
+                            with patch.object(
+                                daemon, "_looks_like_manager", return_value=False
+                            ):
+                                with patch.object(daemon, "_force_kill") as mock_kill:
+                                    result = daemon.stop_daemon(force=True)
+
+                                    assert result is False
+                                    mock_kill.assert_not_called()
 
     def test_stop_daemon_oserror(self):
         """Test stop_daemon with OSError."""
