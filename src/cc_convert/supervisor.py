@@ -29,6 +29,8 @@ from cc_convert.runtime_paths import (
     get_instance_pid_file,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
     """Check if a TCP port is already in use on the given host via socket connect."""
@@ -403,7 +405,14 @@ class InstanceSupervisor:
                     from cc_convert.profile_store import save_profile_store
                     save_profile_store(self._store)
                 except Exception:
-                    pass
+                    # The instance did restart successfully, so this remains a
+                    # success for the caller — reporting failure here would show
+                    # the UI an error while the proxy is actually running on the
+                    # new port. But the change is lost on next restart, so say so.
+                    logger.exception(
+                        "Instance %s restarted but its config was not persisted",
+                        instance_id,
+                    )
                 return {"success": True}
 
             # Rollback: restore old config, restart old instance.
@@ -426,7 +435,12 @@ class InstanceSupervisor:
                 from cc_convert.profile_store import save_profile_store
                 save_profile_store(self._store)
             except Exception:
-                pass
+                # See the note above: the new port is live, so this stays a
+                # success — but the change will not survive a restart.
+                logger.exception(
+                    "Instance %s moved ports but its config was not persisted",
+                    instance_id,
+                )
             return {"success": True}
 
     # ------------------------------------------------------------------
@@ -517,8 +531,11 @@ class InstanceSupervisor:
             if inst.auto_start:
                 ok = await self.start_instance(inst)
                 if not ok:
-                    # Log and continue.
-                    pass
+                    # Log and continue. Previously a bare `pass`, which made
+                    # every auto-start failure on manager boot invisible.
+                    logger.warning(
+                        "Auto-start failed for instance %s (%s)", inst.id, inst.name
+                    )
 
     async def shutdown_all(self) -> None:
         """Stop every running instance and clean up."""
