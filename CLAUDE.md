@@ -86,7 +86,7 @@ ccconvert open       # 浏览器打开 Dashboard
 ## 配置
 
 - 配置文件：`~/.ccconvert/config.toml`（环境变量 `CCCONVERT_CONFIG_DIR` 可覆盖）
-- 运行时数据（`manager.pid` / `manager.json` / `manager.log` / `instances/`）：`%LOCALAPPDATA%\ccconvert`（Windows）或 `~/.local/share/ccconvert`，环境变量 `CCCONVERT_RUNTIME_DIR` 可覆盖
+- 运行时数据（`manager.pid` / `manager.json` / `manager.log` / `instances/` / `logs/`）：`%LOCALAPPDATA%\ccconvert`（Windows）或 `~/.local/share/ccconvert`，环境变量 `CCCONVERT_RUNTIME_DIR` 可覆盖。日志目录也走这里（`get_log_dir()`），勿再另算一份
 - 首次运行自动创建，编辑添加 API Key；完整的用户使用说明见 `docs/使用规范.md`
 
 ## 测试

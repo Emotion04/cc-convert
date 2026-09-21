@@ -50,6 +50,19 @@ def get_runtime_dir() -> Path:
     return Path.home() / ".local" / "share" / "ccconvert"
 
 
+def get_log_dir() -> Path:
+    """Get the directory holding ``server.log`` and ``api.log``.
+
+    Lives under the runtime directory so that ``CCCONVERT_RUNTIME_DIR``
+    relocates logs together with the rest of the runtime state. It previously
+    used a separately-computed path built from ``cc-convert`` (with a hyphen)
+    that honoured no override at all — so a relocated runtime still wrote its
+    logs to the real user directory, and the test suite leaked log output
+    outside its sandbox.
+    """
+    return get_runtime_dir() / "logs"
+
+
 def get_manager_state_file() -> Path:
     """Get path to the manager state JSON file.
 

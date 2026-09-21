@@ -5,54 +5,44 @@ Tests for logging functionality.
 
 import logging
 import os
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from cc_convert.main import get_default_log_dir, setup_logging
+from cc_convert.runtime_paths import get_runtime_dir
 from tests.logging_support import temp_log_dir
 
 
 class TestGetDefaultLogDir:
-    """Tests for get_default_log_dir function."""
+    """Tests for get_default_log_dir.
 
-    def test_windows_log_dir(self):
-        """Test Windows log directory."""
-        with patch.object(sys, "platform", "win32"):
-            with patch.dict(
-                os.environ, {"LOCALAPPDATA": "C:\\Users\\Test\\AppData\\Local"}
-            ):
-                log_dir = get_default_log_dir()
-                # Check path components exist
-                assert "C:\\Users\\Test\\AppData\\Local" in log_dir
-                assert "cc-convert" in log_dir
-                assert "logs" in log_dir
+    The log directory is derived from the runtime directory, so these assert
+    that contract rather than re-implementing the per-platform rules (which
+    live in ``runtime_paths`` and key off ``os.name``, not ``sys.platform``).
+    """
 
-    def test_windows_fallback(self):
-        """Test Windows fallback when LOCALAPPDATA not set."""
-        with patch.object(sys, "platform", "win32"):
-            with patch.dict(os.environ, {}, clear=True):
-                with patch.object(
-                    os.path, "expanduser", return_value="C:\\Users\\Test"
-                ):
-                    log_dir = get_default_log_dir()
-                    # Check path components exist
-                    assert "cc-convert" in log_dir
-                    assert "logs" in log_dir
+    def test_log_dir_is_under_runtime_dir(self):
+        """Logs live under the runtime directory."""
+        assert get_default_log_dir() == str(get_runtime_dir() / "logs")
 
-    def test_macos_log_dir(self):
-        """Test macOS log directory."""
-        with patch.object(sys, "platform", "darwin"):
-            log_dir = get_default_log_dir()
-            assert ".local/share/cc-convert/logs" in log_dir
+    def test_log_dir_follows_runtime_dir_override(self, monkeypatch, tmp_path):
+        """CCCONVERT_RUNTIME_DIR must relocate logs too.
 
-    def test_linux_log_dir(self):
-        """Test Linux log directory."""
-        with patch.object(sys, "platform", "linux"):
-            log_dir = get_default_log_dir()
-            assert ".local/share/cc-convert/logs" in log_dir
+        Regression: the log directory used to be computed independently from
+        LOCALAPPDATA under the hyphenated name "cc-convert", honouring no
+        override at all. A relocated runtime therefore still wrote its logs to
+        the real user directory, and the test suite leaked log output outside
+        its sandbox.
+        """
+        monkeypatch.setenv("CCCONVERT_RUNTIME_DIR", str(tmp_path))
+
+        assert get_default_log_dir() == str(tmp_path / "logs")
+
+    def test_log_dir_component_is_named_logs(self):
+        """The last path component is not platform dependent."""
+        assert Path(get_default_log_dir()).name == "logs"
 
 
 class TestSetupLogging:

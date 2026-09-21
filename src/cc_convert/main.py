@@ -21,23 +21,21 @@ from cc_convert import __version__
 from cc_convert.config import Settings, get_config_file, get_settings
 from cc_convert.protocol import AnthropicError, AnthropicErrorResponse
 from cc_convert.router import openai_router, router
+from cc_convert.runtime_paths import get_log_dir
 from cc_convert.runtime_state import InstanceRuntimeState
 from cc_convert.web import web_router
 
 
 def get_default_log_dir() -> str:
-    """Get default log directory based on platform.
+    """Get default log directory.
+
+    Delegates to :func:`cc_convert.runtime_paths.get_log_dir`, so the directory
+    sits under the runtime directory and follows ``CCCONVERT_RUNTIME_DIR``.
 
     Returns:
         Path to log directory
     """
-    if sys.platform == 'win32':
-        # Windows: use %LOCALAPPDATA%\cc-convert\logs
-        base_dir = os.environ.get('LOCALAPPDATA', os.path.expanduser('~\\AppData\\Local'))
-        return os.path.join(base_dir, 'cc-convert', 'logs')
-    else:
-        # macOS/Linux: use ~/.local/share/cc-convert/logs
-        return os.path.expanduser("~/.local/share/cc-convert/logs")
+    return str(get_log_dir())
 
 
 def _close_logger_handlers(logger: logging.Logger) -> None:
