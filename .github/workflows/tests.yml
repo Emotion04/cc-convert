@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not optional here: the primary way this tool is started is
+        # double-clicking start.bat / start.ps1, and several code paths
+        # (taskkill, CTRL_BREAK_EVENT, runtime-dir selection) only exist there.
+        # A green Linux-only run would be false confidence.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      # Deliberately the plain user-facing command, not a richer one: this is
+      # what makes the dev-dependency consolidation self-verifying. --locked
+      # fails if pyproject.toml and uv.lock have drifted apart.
+      - name: Install (plain `uv sync`)
+        run: uv sync --locked
+
+      - name: Verify the dev environment is complete
+        run: uv run python -c "import pytest_asyncio, pytest_cov, pytest_timeout; print('dev deps OK')"
+
+      - name: Import smoke check
+        run: >-
+          uv run python -c
+          "import cc_convert.main, cc_convert.router, cc_convert.daemon, cc_convert.supervisor; print('imports OK')"
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      # Non-blocking on purpose: this codebase has never been linted, and a
+      # first-run CI should report test results, not a lint backlog.
+      - name: Lint (non-blocking)
+        run: uv run ruff check src tests
+        continue-on-error: true
