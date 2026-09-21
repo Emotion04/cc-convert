@@ -12,25 +12,6 @@ import httpx
 
 _HTTPX_TIMEOUT = httpx.Timeout(connect=15.0, read=300.0, write=30.0, pool=10.0)
 
-
-def _upstream_url(settings: Settings, endpoint: str) -> str:
-    """Build the upstream URL for a given endpoint, respecting upstream_format.
-
-    When ``upstream_format`` is ``"responses"``, routes Anthropic /v1/messages
-    through the upstream's /v1/responses endpoint (with conversion).
-    ``"chat_completions"`` (default) uses /v1/chat/completions.
-    """
-    base = settings.openai_base_url.rstrip("/")
-    fmt = getattr(settings, "upstream_format", "chat_completions") or "chat_completions"
-
-    if endpoint == "messages":
-        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
-    if endpoint == "chat_completions":
-        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
-    if endpoint == "responses":
-        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
-    # models, etc
-    return f"{base}/{endpoint}"
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -59,6 +40,27 @@ from cc_convert.utils import (
     _generate_server_tool_id,
     _normalize_usage,
 )
+
+
+def _upstream_url(settings: Settings, endpoint: str) -> str:
+    """Build the upstream URL for a given endpoint, respecting upstream_format.
+
+    When ``upstream_format`` is ``"responses"``, routes Anthropic /v1/messages
+    through the upstream's /v1/responses endpoint (with conversion).
+    ``"chat_completions"`` (default) uses /v1/chat/completions.
+    """
+    base = settings.openai_base_url.rstrip("/")
+    fmt = getattr(settings, "upstream_format", "chat_completions") or "chat_completions"
+
+    if endpoint == "messages":
+        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
+    if endpoint == "chat_completions":
+        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
+    if endpoint == "responses":
+        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
+    # models, etc
+    return f"{base}/{endpoint}"
+
 
 logger = logging.getLogger(__name__)
 api_logger = logging.getLogger("api")
