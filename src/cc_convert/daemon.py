@@ -307,7 +307,13 @@ def start_daemon(port: int | None = None) -> bool:
     # Dashboard URL stays stable for subsequent runs.
     if _is_port_in_use(port):
         print(f"Port {port} is in use, finding a free port...", file=sys.stderr)
-        new_port = _find_free_port_from(port)
+        # Never take a port this store already assigns to an instance: the
+        # manager would squat on it, the instance could never start, and the
+        # instance would still be reported "running" because something is
+        # listening on its port.
+        new_port = _find_free_port_from(
+            port, exclude={inst.port for inst in store.instances}
+        )
         if new_port is None:
             print(f"Error: no free port found starting from {port}", file=sys.stderr)
             return False

@@ -58,6 +58,45 @@ class TestStartDaemonAdvanced:
                                         assert result is True
                                         mock_save.assert_called_once()
 
+    def test_start_daemon_skips_ports_assigned_to_instances(self):
+        """The manager must not take a port an instance is configured to use.
+
+        On a fresh install the configured manager port (18400) is often already
+        taken, and the scan upward used to ignore instance ports — so the
+        manager could squat on the default instance's 18401. The instance then
+        could never start, yet status still reported it "running", because
+        something *was* listening on its port.
+        """
+        from cc_convert.profile_store import (
+            InstanceProfile,
+            ManagerConfig,
+            ProfileStore,
+        )
+
+        store = ProfileStore(
+            manager=ManagerConfig(port=18400),
+            instances=[
+                InstanceProfile(
+                    name="default",
+                    port=18401,
+                    upstream_base_url="http://127.0.0.1:9/v1",
+                )
+            ],
+        )
+
+        with patch.object(daemon, "_cleanup_stale_pidfile"):
+            with patch.object(daemon, "_read_pid", return_value=None):
+                with patch(
+                    "cc_convert.profile_store.load_profile_store", return_value=store
+                ):
+                    with patch.object(daemon, "_is_port_in_use", return_value=True):
+                        with patch.object(
+                            daemon, "_find_free_port_from", return_value=None
+                        ) as mock_find:
+                            daemon.start_daemon()
+
+        assert mock_find.call_args.kwargs["exclude"] == {18401}
+
     def test_start_daemon_process_exits_immediately(self):
         """Test when daemon process exits immediately."""
         mock_process = MagicMock()
