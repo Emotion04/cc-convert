@@ -502,7 +502,12 @@ Examples:
         port = args.port or store.manager.port
         success = daemon.start_daemon(port=port)
         if success:
-            print(f"Dashboard: http://127.0.0.1:{port}")
+            # start_daemon moves to a different port when the configured one is
+            # already taken, so read back where it actually landed. Printing the
+            # port we asked for could send the user to a *different* manager.
+            _, _, actual_config = daemon.get_status()
+            actual_port = (actual_config or {}).get("port", port)
+            print(f"Dashboard: http://127.0.0.1:{actual_port}")
             # Print running instance ports
             if store.instances:
                 from cc_convert.runtime_paths import get_instance_pid_file
