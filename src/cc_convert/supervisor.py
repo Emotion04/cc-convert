@@ -85,15 +85,22 @@ def _process_name(pid: int) -> str:
     """Return a short process name for *pid* (best-effort)."""
     try:
         if platform.system() == "Windows":
+            # tasklist rather than wmic: Windows 11 24H2+ no longer ships wmic,
+            # so this silently returned "" and left the port owner unidentified
+            # in the dashboard's port-conflict view.
             result = subprocess.run(
-                ["wmic", "process", "where", f"ProcessId={pid}", "get", "Name", "/value"],
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
             for line in result.stdout.splitlines():
-                if "=" in line:
-                    return line.split("=", 1)[1].strip()
+                line = line.strip()
+                # Rows look like: "python.exe","12345","Console","1","50,000 K".
+                # When nothing matches, tasklist prints a localised message
+                # instead of a CSV row, so only trust rows starting with a quote.
+                if line.startswith('"'):
+                    return line.split('","')[0].strip('"')
         else:
             result = subprocess.run(
                 ["ps", "-p", str(pid), "-o", "comm="],
