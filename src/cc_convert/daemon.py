@@ -82,17 +82,50 @@ def _is_process_running(pid: int) -> bool:
 
     ``os.kill(pid, 0)`` is unreliable on Windows (always reports the process
     as gone), so query the process handle via ``OpenProcess`` there.
+
+    ``OpenProcess`` on its own is not sufficient, though: Windows keeps a
+    terminated process's object — and therefore a valid PID and a valid handle
+    — alive until every handle to it is closed. Asking for the exit code is
+    what distinguishes "alive" from "terminated but not yet reaped". Without
+    that, a force-killed manager looked alive indefinitely, its stale pidfile
+    was never cleaned up, and ``ccconvert start`` refused to start a
+    replacement.
     """
     if os.name == "nt":
         import ctypes
+        from ctypes import wintypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+
         kernel32 = ctypes.windll.kernel32
+        # Declare the signatures: without restype the 64-bit HANDLE would be
+        # truncated to a 32-bit int.
+        kernel32.OpenProcess.argtypes = [
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        ]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if handle:
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                # State unknown — treat as gone, so a stale pidfile can never
+                # block a restart.
+                return False
+            return exit_code.value == STILL_ACTIVE
+        finally:
             kernel32.CloseHandle(handle)
-            return True
-        return False
     try:
         os.kill(pid, 0)
         return True
@@ -146,25 +179,38 @@ def _find_pid_by_port(port: int) -> Optional[int]:
     return None
 
 
+def _can_bind(port: int, host: str) -> bool:
+    """Return True if *host*:*port* can be bound right now."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # No SO_REUSEADDR: on Windows it permits double-binding and would
+            # make the probe report an occupied port as free.
+            s.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
 def _find_free_port_from(start: int, exclude: Optional[set[int]] = None) -> Optional[int]:
     """Return the first free port scanning upward from *start*.
 
-    Uses a ``bind()`` probe rather than ``connect_ex``: connect_ex can report
-    a listener's backlog-full port as free, while bind() reliably raises
-    EADDRINUSE on any occupied port.
+    Probes by binding rather than ``connect_ex``, which can report a listener
+    with a full backlog as free.
+
+    Both the loopback and the wildcard address are probed, and *both* must
+    succeed. A single probe is not sufficient on Windows: a specific-address
+    bind (``127.0.0.1``) succeeds even while another socket holds the wildcard
+    address (``0.0.0.0``), and vice versa, because Windows lets the two coexist
+    where Linux returns EADDRINUSE. Probing only loopback previously handed
+    back the manager's own port while a manager was already listening on
+    ``0.0.0.0`` — the new manager then started on the same port as the old one.
     """
     exclude = exclude or set()
     for port in range(start, start + 2000):
         if port in exclude:
             continue
-        try:
-            # NOTE: no SO_REUSEADDR — on Windows it permits double-binding and
-            # would make the probe report an occupied port as free.
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("127.0.0.1", port))
+        if _can_bind(port, "127.0.0.1") and _can_bind(port, "0.0.0.0"):
             return port
-        except OSError:
-            continue
     return None
 
 

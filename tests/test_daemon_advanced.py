@@ -2,7 +2,10 @@
 Advanced tests for daemon module covering subprocess and edge cases.
 """
 
+import os
 import signal
+import socket
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -330,6 +333,85 @@ class TestEnsureDirsEdgeCases:
                 # manager-logs.
                 assert mock_mkdir.call_count == 3
                 mock_mkdir.assert_called_with(parents=True, exist_ok=True)
+
+
+class TestIsProcessRunning:
+    """Regression tests for process liveness detection."""
+
+    def test_terminated_process_with_open_handle_is_not_running(self):
+        """A terminated process must not be reported as running.
+
+        Windows keeps a terminated process's object — and therefore a valid
+        PID and a valid ``OpenProcess`` handle — alive until every handle to it
+        is closed. Testing only ``OpenProcess`` made a force-killed manager look
+        alive indefinitely: its stale pidfile was never cleaned up, so
+        ``ccconvert start`` refused to start a replacement and the user was
+        stuck until they deleted the pidfile by hand.
+
+        ``Popen`` keeps its handle open, which reproduces exactly that
+        condition: the child has exited but its process object lingers.
+        """
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        try:
+            proc.wait()
+            assert daemon._is_process_running(proc.pid) is False
+        finally:
+            proc.kill()
+
+    def test_current_process_is_running(self):
+        """Our own process must be reported as running."""
+        assert daemon._is_process_running(os.getpid()) is True
+
+
+class TestFindFreePortFrom:
+    """Regression tests for the port-scan probe used when starting a manager."""
+
+    def test_skips_port_held_on_wildcard_address(self):
+        """A port held on 0.0.0.0 must not be reported free.
+
+        Windows lets a bind to 127.0.0.1 succeed even while another socket
+        holds 0.0.0.0 on the same port, and vice versa — where Linux returns
+        EADDRINUSE, Windows allows both. Probing only loopback therefore
+        reported the manager's own port as free while a manager was already
+        listening, and the second manager started on the same port (then killed
+        the first, since stop_daemon locates a stray process by port).
+        """
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            blocker.bind(("0.0.0.0", 0))
+            blocker.listen(1)
+            occupied = blocker.getsockname()[1]
+
+            # The coexistence that made the old probe wrong.
+            assert daemon._can_bind(occupied, "127.0.0.1") is True
+
+            assert daemon._find_free_port_from(occupied) != occupied
+        finally:
+            blocker.close()
+
+    def test_skips_port_held_on_loopback(self):
+        """A port held on 127.0.0.1 must not be reported free either."""
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            blocker.bind(("127.0.0.1", 0))
+            blocker.listen(1)
+            occupied = blocker.getsockname()[1]
+
+            assert daemon._find_free_port_from(occupied) != occupied
+        finally:
+            blocker.close()
+
+    def test_returns_none_when_range_is_exhausted(self):
+        """An exclude set covering the whole scan range yields None, not a crash."""
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            blocker.bind(("0.0.0.0", 0))
+            blocker.listen(1)
+            occupied = blocker.getsockname()[1]
+
+            assert daemon._find_free_port_from(occupied, exclude=set(range(occupied, occupied + 2000))) is None
+        finally:
+            blocker.close()
 
 
 if __name__ == "__main__":
