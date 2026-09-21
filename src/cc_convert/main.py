@@ -40,6 +40,22 @@ def get_default_log_dir() -> str:
         return os.path.expanduser("~/.local/share/cc-convert/logs")
 
 
+def _close_logger_handlers(logger: logging.Logger) -> None:
+    """Remove and close every handler attached to ``logger``.
+
+    Handlers must be *closed*, not merely dropped: a file handler whose
+    reference is discarded keeps its file open until garbage collection,
+    which on Windows blocks deleting or rotating the log directory.
+    """
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            # Closing must never prevent the application from starting.
+            pass
+
+
 def setup_logging(log_level: str, log_dir: str | None = None) -> None:
     """Setup logging with daily rotation, keeping only today's logs.
 
@@ -69,8 +85,8 @@ def setup_logging(log_level: str, log_dir: str | None = None) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper()))
 
-    # Clear existing handlers
-    root_logger.handlers = []
+    # Clear existing handlers, closing them so their files are released.
+    _close_logger_handlers(root_logger)
 
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
@@ -101,9 +117,13 @@ def setup_logging(log_level: str, log_dir: str | None = None) -> None:
     api_handler.setFormatter(logging.Formatter("%(message)s"))
     api_handler.setLevel(getattr(logging, log_level.upper()))
 
-    # Create dedicated API logger
+    # Create dedicated API logger.
+    # Must be cleared first: addHandler appends, so repeated setup_logging
+    # calls would otherwise stack a new api.log handler each time and
+    # duplicate every api log line (and leak a file handle per call).
     api_logger = logging.getLogger("api")
     api_logger.setLevel(getattr(logging, log_level.upper()))
+    _close_logger_handlers(api_logger)
     api_logger.addHandler(api_handler)
     api_logger.propagate = False  # Don't propagate to root logger
 
