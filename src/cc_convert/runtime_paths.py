@@ -120,13 +120,29 @@ def get_instance_meta_file(instance_id: str) -> Path:
     return get_instance_dir(instance_id) / "ccconvert.json"
 
 
-def get_manager_log_dir() -> Path:
-    """Get manager log directory.
+def get_manager_log_file() -> Path:
+    """Get the manager's log file.
+
+    Both ``daemon`` (which redirects the manager subprocess's stdout here) and
+    ``daemon_runner`` (which attaches its root file handler here) must resolve
+    this identically. They used to compute different paths — the process output
+    went to ``manager.log`` while every ``logging`` record went to
+    ``manager-logs/manager.log`` — so ``ccconvert logs``, which reads the
+    former, showed none of the application's errors or warnings.
 
     Returns:
-        Path to manager-logs under the runtime directory
+        Path to manager.log under the runtime directory
     """
-    return get_runtime_dir() / "manager-logs"
+    return get_runtime_dir() / "manager.log"
+
+
+def get_manager_log_dir() -> Path:
+    """Get the directory containing the manager log.
+
+    Returns:
+        Path to the runtime directory
+    """
+    return get_manager_log_file().parent
 
 
 def ensure_dirs() -> None:
@@ -141,9 +157,6 @@ def ensure_dirs() -> None:
     runtime_dir = get_runtime_dir()
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
-    get_manager_log_dir().mkdir(parents=True, exist_ok=True)
-
     if os.name != "nt":
         config_dir.chmod(0o700)
         runtime_dir.chmod(0o700)
-        get_manager_log_dir().chmod(0o700)

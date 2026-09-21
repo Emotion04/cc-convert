@@ -17,12 +17,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from cc_convert.runtime_paths import ensure_dirs, get_runtime_dir
+from cc_convert.runtime_paths import ensure_dirs, get_manager_log_file, get_runtime_dir
 
 # Paths (runtime_paths-based, replaces old DATA_DIR / PID_FILE / CONFIG_FILE / LOG_FILE)
 MANAGER_PID_FILE = get_runtime_dir() / "manager.pid"
 MANAGER_CONFIG_FILE = get_runtime_dir() / "manager.json"
-MANAGER_LOG_FILE = get_runtime_dir() / "manager.log"
+MANAGER_LOG_FILE = get_manager_log_file()
 
 
 def _read_pid() -> Optional[int]:

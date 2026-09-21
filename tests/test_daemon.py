@@ -21,7 +21,7 @@ class TestEnsureDirs:
         with patch.object(Path, "mkdir") as mock_mkdir:
             with patch.object(Path, "exists", return_value=False):
                 daemon.ensure_dirs()
-                # ensure_dirs creates several directories (config, runtime, manager-logs)
+                # ensure_dirs creates the config and runtime directories
                 assert mock_mkdir.called
                 mock_mkdir.assert_called_with(parents=True, exist_ok=True)
 

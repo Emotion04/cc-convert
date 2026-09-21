@@ -414,9 +414,11 @@ class TestEnsureDirsEdgeCases:
         with patch.object(Path, "mkdir") as mock_mkdir:
             with patch.object(Path, "exists", return_value=True):
                 daemon.ensure_dirs()
-                # ensure_dirs creates three directories: config, runtime, and
-                # manager-logs.
-                assert mock_mkdir.call_count == 3
+                # ensure_dirs creates two directories: config and runtime.
+                # (A third, manager-logs, used to be created here; the manager
+                # log now lives directly in the runtime directory so that
+                # `ccconvert logs` reads the file that actually gets written.)
+                assert mock_mkdir.call_count == 2
                 mock_mkdir.assert_called_with(parents=True, exist_ok=True)
 
 
