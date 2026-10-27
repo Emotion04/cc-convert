@@ -171,7 +171,11 @@ async def _stream_response(
                     )
                     yield f"event: message_start\ndata: {json.dumps(start_event)}\n\n"
                     first_chunk = False
-                    continue
+                    # Some providers put the first token in the same chunk as
+                    # the metadata. Fall through so it is not dropped; only
+                    # skip when there is no choice to process.
+                    if not chunk.get("choices"):
+                        continue
 
                 # Handle usage-only chunks
                 if not chunk.get("choices"):

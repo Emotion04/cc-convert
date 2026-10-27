@@ -37,6 +37,17 @@
   - `httpx.ConnectError` 的 `str()` 为空，日志只有 `Stream error: `
   - 现在输出异常类型 + 主机 + 排查提示，客户端也能看到具体原因
 
+- [x] **流式响应丢弃首个 chunk 的内容**
+  - `_stream_response` 把第一个 chunk 整体当作 `message_start` 处理并 `continue`，
+    若上游在同一 chunk 里带了首个 token，该 token 会被丢弃
+  - 已改为：发出 `message_start` 后仅在无 `choices` 时跳过，否则继续处理
+- [ ] **content 中的字面 `<thinking>` 标签（暂不修）**
+  - 上游若把推理写成 `<thinking>...</thinking>` 放在 `content` 里（而非
+    `reasoning_content` 字段），cc-convert 会当作普通文本透传，标签可见
+  - 不影响功能，也不额外产生 token；仅观感问题
+  - 不修的原因：状态机解析可能误伤真正讨论 XML 或包含该字面量的内容
+  - 若要修，应做成默认关闭的开关
+
 ### P0 — Clash / 网络
 
 - [ ] **Clash 核心处于半死状态**（2026-10-24 观测）

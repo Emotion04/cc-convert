@@ -731,6 +731,71 @@ class TestAddToolResultsToMessages:
         assert "error" in result[1]["content"]
 
 
+class TestFirstChunkContent:
+    """A token in the first chunk must not be swallowed by message_start."""
+
+    @pytest.mark.asyncio
+    async def test_first_chunk_with_content_is_emitted(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        async def aiter_lines():
+            yield "data: " + json.dumps(
+                {
+                    "id": "msg_1",
+                    "choices": [
+                        {"delta": {"role": "assistant", "content": "Hello"}}
+                    ],
+                }
+            )
+            yield "data: [DONE]"
+
+        mock_response.aiter_lines = aiter_lines
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(
+            return_value=async_context_manager(mock_response)
+        )
+
+        chunks = []
+        async for chunk in _stream_response(
+            mock_client,
+            "http://test.com",
+            {"Authorization": "Bearer test"},
+            {"model": "test"},
+            "test-model",
+        ):
+            chunks.append(chunk)
+
+        assert any(
+            "content_block_delta" in c and '"text_delta"' in c and "Hello" in c
+            for c in chunks
+        )
+
+    @pytest.mark.asyncio
+    async def test_first_chunk_without_choices_still_emits_message_start(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        async def aiter_lines():
+            yield "data: " + json.dumps({"id": "msg_1", "choices": []})
+            yield "data: [DONE]"
+
+        mock_response.aiter_lines = aiter_lines
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(
+            return_value=async_context_manager(mock_response)
+        )
+
+        chunks = []
+        async for chunk in _stream_response(
+            mock_client, "http://test.com", {}, {"model": "test"}, "test-model"
+        ):
+            chunks.append(chunk)
+
+        assert any("message_start" in c for c in chunks)
+        assert not any("content_block_delta" in c for c in chunks)
+
+
 class TestStreamCacheUsage:
     """Cache usage from upstream must surface in Anthropic usage fields."""
 
