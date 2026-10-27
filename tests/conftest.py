@@ -86,6 +86,20 @@ def _restore_sandbox_env():
 
 
 @pytest.fixture(autouse=True)
+def _disable_upstream_probe(monkeypatch):
+    """Keep tests offline: the save-time reachability check makes real calls.
+
+    Tests that assert on warnings patch this back themselves.
+    """
+    from cc_convert.web import routes
+
+    async def _noop(base_url, api_key="", timeout=4.0):
+        return []
+
+    monkeypatch.setattr(routes, "check_upstream_base_url", _noop)
+
+
+@pytest.fixture(autouse=True)
 def _release_log_file_handlers():
     """Close file handlers that ``setup_logging`` leaves attached to loggers.
 

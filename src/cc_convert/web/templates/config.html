@@ -27,6 +27,19 @@
                 </div>
             </div>
 
+            <!-- Advisory warnings from the backend. The configuration has
+                 already been saved; these never block the user. -->
+            <div x-show="saveWarnings.length" x-cloak
+                 class="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p class="text-sm font-semibold text-amber-700 mb-1">已保存，但检测到以下问题：</p>
+                <ul class="list-disc pl-5 space-y-1">
+                    <template x-for="w in saveWarnings" :key="w">
+                        <li class="text-xs leading-relaxed text-amber-700" x-text="w"></li>
+                    </template>
+                </ul>
+                <a href="/" class="inline-block mt-2 text-xs font-semibold text-amber-800 underline">仍返回列表</a>
+            </div>
+
             <div class="space-y-5">
                 <!-- Name -->
                 <div>
@@ -212,6 +225,8 @@ function instanceConfig() {
         instanceId: null,
         isEdit: false,
         saving: false,
+        // Backend advisory messages shown after a successful save.
+        saveWarnings: [],
         showKey: false,
         clearKey: false,
         loading: true,
@@ -356,8 +371,17 @@ function instanceConfig() {
                 });
 
                 if (r.ok) {
-                    showToast(this.isEdit ? '实例已更新' : '实例已创建', 'success');
-                    setTimeout(() => { window.location.href = '/'; }, 500);
+                    const data = await r.json().catch(() => ({}));
+                    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+                    if (warnings.length) {
+                        // Saved successfully — keep the user here so the warning
+                        // is actually readable instead of auto-redirecting.
+                        this.saveWarnings = warnings;
+                        showToast('已保存，但有需要注意的问题', 'warning');
+                    } else {
+                        showToast(this.isEdit ? '实例已更新' : '实例已创建', 'success');
+                        setTimeout(() => { window.location.href = '/'; }, 500);
+                    }
                 } else {
                     const data = await r.json();
                     showToast(data.detail || '保存失败', 'error');

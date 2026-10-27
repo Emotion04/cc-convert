@@ -216,3 +216,76 @@ class TestProfileStore:
         # Empty string clears the key
         assert _reject_masked(inst, "") is True
         assert inst.upstream_api_key == ""
+
+
+class TestCheckUpstreamBaseUrl:
+    """Advisory check run when saving an instance. Never blocks the save."""
+
+    @staticmethod
+    def _client(responses):
+        class FakeClient:
+            def __init__(self):
+                self.posted = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url, **kwargs):
+                self.posted.append(url)
+                item = responses.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                from types import SimpleNamespace
+
+                return SimpleNamespace(status_code=item)
+
+        return FakeClient()
+
+    def _run(self, responses, base="https://api.example.com", key="k"):
+        import asyncio
+        from unittest.mock import patch
+
+        from cc_convert.profile_store import check_upstream_base_url
+
+        client = self._client(responses)
+        with patch("httpx.AsyncClient", return_value=client):
+            warnings = asyncio.run(check_upstream_base_url(base, key))
+        return warnings, client
+
+    def test_path_exists_gives_no_warning(self):
+        warnings, _ = self._run([400])
+        assert warnings == []
+
+    def test_missing_v1_suggests_the_prefix(self):
+        warnings, client = self._run(
+            [404, 400], base="https://api.aiaimax.com"
+        )
+
+        assert len(warnings) == 1
+        assert "/v1" in warnings[0]
+        # It really did probe the /v1 variant.
+        assert any("/v1/chat/completions" in u for u in client.posted)
+
+    def test_404_with_v1_present_reports_path_problem(self):
+        warnings, client = self._run([404], base="https://api.example.com/v1")
+
+        assert len(warnings) == 1
+        assert "404" in warnings[0]
+        assert not any("/v1/v1" in u for u in client.posted)
+
+    def test_connection_failure_is_reported_not_raised(self):
+        import httpx
+
+        warnings, _ = self._run([httpx.ConnectError("")])
+
+        assert len(warnings) == 1
+        assert "无法连接" in warnings[0]
+
+    def test_other_status_is_reported(self):
+        warnings, _ = self._run([502])
+
+        assert len(warnings) == 1
+        assert "502" in warnings[0]

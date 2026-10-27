@@ -407,3 +407,69 @@ async def detect_upstream_format(base_url: str, api_key: str = "", timeout: floa
 
     # 3. Default to chat_completions (most universal)
     return "chat_completions"
+
+
+async def check_upstream_base_url(
+    base_url: str, api_key: str = "", timeout: float = 4.0
+) -> list[str]:
+    """Best-effort warnings about an upstream base URL.
+
+    Used when saving an instance: the configuration is always persisted, and
+    the returned strings are advisory only. Never raises.
+
+    A provider that uses the common ``/v1`` prefix but was configured without
+    it answers 404 on every path — which clients misread as "the model does not
+    exist". When that happens this probes ``/v1`` as well and says so.
+    """
+    import httpx
+
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return []
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    probe = {
+        "model": "ping",
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "p"}],
+    }
+    # These mean "the path exists"; the probe itself is just invalid.
+    path_exists = {200, 400, 401, 403, 422}
+
+    async def _probe(url: str):
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            return await client.post(url, headers=headers, json=probe)
+
+    try:
+        response = await _probe(f"{base}/chat/completions")
+    except Exception as exc:
+        return [
+            f"无法连接上游 {base}（{type(exc).__name__}）。配置已保存，可稍后修复。"
+        ]
+
+    if response.status_code in path_exists:
+        return []
+
+    if response.status_code == 404:
+        if "/v1" not in base:
+            try:
+                retry = await _probe(f"{base}/v1/chat/completions")
+                if retry.status_code in path_exists:
+                    return [
+                        f'Base URL 可能缺少 "/v1"：{base}/v1/chat/completions 可用，'
+                        f"而当前配置会请求 {base}/chat/completions。"
+                        "配置已保存，可修改后再测试。"
+                    ]
+            except Exception:
+                pass
+        return [
+            f"上游返回 404：{base}/chat/completions 不存在，请检查 Base URL 路径。"
+            "配置已保存。"
+        ]
+
+    return [
+        f"上游返回 HTTP {response.status_code}：{base}/chat/completions。"
+        "配置已保存，请确认上游状态。"
+    ]

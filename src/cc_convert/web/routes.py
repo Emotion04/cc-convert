@@ -16,6 +16,7 @@ from cc_convert import __version__
 from cc_convert.profile_store import (
     InstanceProfile,
     ProfileStore,
+    check_upstream_base_url,
     load_profile_store,
     save_profile_store,
     mask_api_key,
@@ -208,7 +209,13 @@ async def create_instance(request: Request):
     )
 
     store.instances.append(instance)
+    # Persist first: the reachability check is advisory and must never prevent
+    # the user from saving a configuration they are still fixing.
     save_profile_store(store)
+
+    warnings = await check_upstream_base_url(
+        instance.upstream_base_url, instance.upstream_api_key
+    )
 
     auto = data.get("auto_start", True)
     status = None
@@ -216,7 +223,7 @@ async def create_instance(request: Request):
         ok = await supervisor.start_instance(instance)
         status = {"status": "running" if ok else "error"}
 
-    return _instance_to_response(instance, status)
+    return {**_instance_to_response(instance, status), "warnings": warnings}
 
 
 @web_router.get("/api/instances/{instance_id}")
@@ -241,6 +248,13 @@ async def update_instance(request: Request, instance_id: str):
         data = await request.json()
     except Exception:
         raise HTTPException(400, detail="Invalid JSON body")
+
+    # The upstream fields may be stripped or rewritten below; remember whether
+    # the user actually touched them so we only probe when it is meaningful.
+    touches_upstream = any(
+        key in data
+        for key in ("upstream_base_url", "upstream_api_key", "clear_upstream_api_key")
+    )
 
     # Find the instance
     instance = None
@@ -298,7 +312,13 @@ async def update_instance(request: Request, instance_id: str):
     for inst in store.instances:
         if inst.id == instance_id:
             st = await supervisor.get_instance_status(instance_id)
-            return _instance_to_response(inst, st)
+            warnings = []
+            if touches_upstream:
+                # Advisory only — the update above has already been applied.
+                warnings = await check_upstream_base_url(
+                    inst.upstream_base_url, inst.upstream_api_key
+                )
+            return {**_instance_to_response(inst, st), "warnings": warnings}
 
     raise HTTPException(404, detail="Instance not found after update")
 
