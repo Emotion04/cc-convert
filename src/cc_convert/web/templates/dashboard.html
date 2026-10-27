@@ -78,14 +78,8 @@
                               }"></span>
                         <div class="min-w-0">
                             <p class="text-sm font-bold text-stone-900 truncate" x-text="inst.name"></p>
-                            <p class="text-[11px] text-stone-400 font-mono">
-                                <span x-show="!showPrefix">127.0.0.1:</span>
-                                <span x-show="showPrefix" class="text-teal-500">http://127.0.0.1:</span>
-                                <span x-text="inst.port"></span>
-                                <button @click="showPrefix = !showPrefix" class="ml-1 text-[9px] align-middle px-1 rounded cursor-pointer"
-                                        :class="showPrefix ? 'bg-teal-100 text-teal-600' : 'bg-stone-100 text-stone-400 hover:text-stone-600'"
-                                        title="切换 http:// 前缀">http</button>
-                            </p>
+                            <!-- Keep the spans adjacent: whitespace between inline elements is rendered as a visible space, which showed up as "127.0.0.1: 18402". -->
+                            <p class="text-[11px] text-stone-400 font-mono whitespace-nowrap"><span x-show="!showPrefix">127.0.0.1:</span><span x-show="showPrefix" class="text-teal-500">http://127.0.0.1:</span><span x-text="inst.port"></span><button @click="showPrefix = !showPrefix" class="ml-1 text-[9px] align-middle px-1 rounded cursor-pointer" :class="showPrefix ? 'bg-teal-100 text-teal-600' : 'bg-stone-100 text-stone-400 hover:text-stone-600'" title="切换 http:// 前缀">http</button></p>
                         </div>
                     </div>
                     <!-- Status Badge -->
@@ -126,18 +120,35 @@
                 <div class="flex flex-wrap gap-2 pt-3 border-t border-stone-100">
                     <!-- Start/Stop -->
                     <button @click="toggleInstance(inst)"
-                            class="px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer"
-                            :class="inst.status === 'running'
-                                ? 'bg-amber-50 text-amber-600 hover:bg-amber-100'
-                                : 'bg-teal-50 text-teal-600 hover:bg-teal-100'">
-                        <span x-text="inst.status === 'running' ? '停止' : '启动'"></span>
+                            :disabled="!!busy[inst.id]"
+                            class="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-semibold transition"
+                            :class="busy[inst.id]
+                                ? 'bg-stone-100 text-stone-400 cursor-wait'
+                                : (inst.status === 'running'
+                                    ? 'bg-amber-50 text-amber-600 hover:bg-amber-100 cursor-pointer'
+                                    : 'bg-teal-50 text-teal-600 hover:bg-teal-100 cursor-pointer')">
+                        <svg x-show="!!busy[inst.id]" class="animate-spin -ml-0.5 mr-1 h-3 w-3" viewBox="0 0 24 24" fill="none">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                        </svg>
+                        <span x-text="busy[inst.id]
+                            ? (busy[inst.id] === 'stop' ? '停止中…' : '启动中…')
+                            : (inst.status === 'running' ? '停止' : '启动')"></span>
                     </button>
 
                     <!-- Restart -->
                     <button @click="restartInstance(inst)"
-                            class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 text-stone-600 hover:bg-stone-200 transition cursor-pointer"
+                            :disabled="!!busy[inst.id]"
+                            class="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-semibold transition"
+                            :class="busy[inst.id]
+                                ? 'bg-stone-100 text-stone-400 cursor-wait'
+                                : 'bg-stone-100 text-stone-600 hover:bg-stone-200 cursor-pointer'"
                             x-show="inst.status === 'running'">
-                        重启
+                        <svg x-show="busy[inst.id] === 'restart'" class="animate-spin -ml-0.5 mr-1 h-3 w-3" viewBox="0 0 24 24" fill="none">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                        </svg>
+                        <span x-text="busy[inst.id] === 'restart' ? '重启中…' : '重启'"></span>
                     </button>
 
                     <!-- Edit -->
@@ -220,6 +231,9 @@ function dashboard() {
         manager: { version: '', pid: 0, port: 0, host: '127.0.0.1', uptime: 0, instance_count: 0, running_count: 0 },
         deleteTarget: null,
         showPrefix: false,
+        // Per-instance in-flight action: 'start' | 'stop' | 'restart'.
+        // Drives the spinner and disables the buttons while a request runs.
+        busy: {},
 
         async init() {
             await Promise.all([
@@ -252,43 +266,48 @@ function dashboard() {
         },
 
         async toggleInstance(inst) {
-            const csrf = getCsrfToken();
-            const endpoint = inst.status === 'running'
-                ? `/api/instances/${inst.id}/stop`
-                : `/api/instances/${inst.id}/start`;
-            try {
-                const r = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'X-CCCONVERT-CSRF': csrf }
-                });
-                if (r.ok) {
-                    showToast(inst.status === 'running' ? '实例已停止' : '实例已启动', 'success');
-                    await this.fetchInstances();
-                } else {
-                    const data = await r.json();
-                    showToast(data.detail || '操作失败', 'error');
-                }
-            } catch (e) {
-                showToast('操作失败: ' + e.message, 'error');
-            }
+            if (this.busy[inst.id]) return;
+            const action = inst.status === 'running' ? 'stop' : 'start';
+            // Starting waits for the worker's health check; give it a ceiling so
+            // the spinner cannot run forever on a hung upstream.
+            await this._runInstanceAction(inst, action, 90000);
         },
 
         async restartInstance(inst) {
-            const csrf = getCsrfToken();
+            if (this.busy[inst.id]) return;
+            await this._runInstanceAction(inst, 'restart', 120000);
+        },
+
+        async _runInstanceAction(inst, action, timeoutMs) {
+            this.busy[inst.id] = action;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const label = action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启';
             try {
-                const r = await fetch(`/api/instances/${inst.id}/restart`, {
+                const r = await fetch(`/api/instances/${inst.id}/${action}`, {
                     method: 'POST',
-                    headers: { 'X-CCCONVERT-CSRF': csrf }
+                    headers: { 'X-CCCONVERT-CSRF': getCsrfToken() },
+                    signal: controller.signal,
                 });
-                if (r.ok) {
-                    showToast('实例正在重启...', 'success');
-                    setTimeout(() => this.fetchInstances(), 2000);
+                let data = null;
+                try { data = await r.json(); } catch (e) { /* empty body */ }
+
+                if (!r.ok) {
+                    const detail = (data && (data.detail || (data.error && data.error.message)))
+                        || `HTTP ${r.status}`;
+                    showToast(`${label}失败：${detail}。可查看实例日志获取原因。`, 'error');
                 } else {
-                    const data = await r.json();
-                    showToast(data.detail || '重启失败', 'error');
+                    showToast(action === 'start' ? '实例已启动' : action === 'stop' ? '实例已停止' : '实例已重启', 'success');
                 }
             } catch (e) {
-                showToast('重启失败: ' + e.message, 'error');
+                const detail = e.name === 'AbortError'
+                    ? `超时（${Math.round(timeoutMs / 1000)} 秒）`
+                    : e.message;
+                showToast(`${label}失败：${detail}。可查看实例日志获取原因。`, 'error');
+            } finally {
+                clearTimeout(timer);
+                this.busy[inst.id] = null;
+                await this.fetchInstances();
             }
         },
 

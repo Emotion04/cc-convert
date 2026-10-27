@@ -24,7 +24,20 @@ from cc_convert.profile_store import (
 
 web_router = APIRouter()
 
-templates_dir = Path(__file__).parent / "templates"
+def _templates_directory() -> Path:
+    """Locate the Jinja templates.
+
+    In a frozen build ``__file__`` points inside the bundle and the templates
+    are unpacked under ``sys._MEIPASS``; in a source checkout they sit next to
+    this module.
+    """
+    bundled = getattr(sys, "_MEIPASS", None)
+    if bundled:
+        return Path(bundled) / "cc_convert" / "web" / "templates"
+    return Path(__file__).parent / "templates"
+
+
+templates_dir = _templates_directory()
 
 
 def _csrf_context(request: Request) -> dict:
@@ -68,6 +81,21 @@ def _instance_to_response(inst: InstanceProfile, status: dict | None = None) -> 
         d["instance_started_at"] = None
         d["instance_uptime"] = None
     return d
+
+
+def _normalize_instance_fields(data: dict) -> None:
+    """Trim stray whitespace from user-pasted instance fields.
+
+    Values copied from a browser or chat window often carry leading/trailing
+    spaces. A URL with a leading space fails the ``http://`` check outright,
+    and a key with a trailing space is sent inside the Authorization header,
+    where the upstream rejects it. Trimming only the ends cannot change a
+    legitimate URL or API key.
+    """
+    for field in ("upstream_base_url", "upstream_api_key"):
+        value = data.get(field)
+        if isinstance(value, str):
+            data[field] = value.strip()
 
 
 def _validate_instance_body(data: dict, require_key: bool = True) -> list[str]:
@@ -155,6 +183,8 @@ async def create_instance(request: Request):
         data = await request.json()
     except Exception:
         raise HTTPException(400, detail="Invalid JSON body")
+
+    _normalize_instance_fields(data)
 
     errors = _validate_instance_body(data, require_key=True)
     if errors:
@@ -254,6 +284,7 @@ async def update_instance(request: Request, instance_id: str):
         return _instance_to_response(instance, st)
 
     # Validate remaining fields
+    _normalize_instance_fields(data)
     errors = _validate_instance_body(data, require_key=False)
     if errors:
         raise HTTPException(422, detail="; ".join(errors))
@@ -387,8 +418,8 @@ async def detect_format(request: Request):
         data = await request.json()
     except Exception:
         raise HTTPException(400, detail="Invalid JSON body")
-    base_url = data.get("url", "")
-    api_key = data.get("key", "")
+    base_url = (data.get("url") or "").strip()
+    api_key = (data.get("key") or "").strip()
     if not base_url:
         raise HTTPException(400, detail="url is required")
     from cc_convert.profile_store import detect_upstream_format as _detect

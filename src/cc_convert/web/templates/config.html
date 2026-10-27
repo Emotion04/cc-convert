@@ -281,7 +281,10 @@ function instanceConfig() {
                 const r = await fetch('/api/detect-format', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'X-CCCONVERT-CSRF': getCsrfToken()},
-                    body: JSON.stringify({url: this.formData.upstream_base_url, key: this.formData.upstream_api_key})
+                    body: JSON.stringify({
+                        url: (this.formData.upstream_base_url || '').trim(),
+                        key: (this.formData.upstream_api_key || '').trim()
+                    })
                 });
                 if (r.ok) {
                     const data = await r.json();
@@ -299,8 +302,15 @@ function instanceConfig() {
         },
 
         async saveConfig() {
+            // Pasted values frequently carry stray leading/trailing spaces.
+            // A leading space makes the URL fail the http:// check, and a
+            // trailing space ends up inside the Authorization header.
+            this.formData.name = (this.formData.name || '').trim();
+            this.formData.upstream_base_url = (this.formData.upstream_base_url || '').trim();
+            this.formData.upstream_api_key = (this.formData.upstream_api_key || '').trim();
+
             // Validate
-            if (!this.formData.name.trim()) {
+            if (!this.formData.name) {
                 showToast('请输入实例名称', 'error');
                 return;
             }
