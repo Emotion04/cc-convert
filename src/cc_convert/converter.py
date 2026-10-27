@@ -214,6 +214,30 @@ def _resolve_reasoning_effort(
     return "high"
 
 
+def _is_tool_result_only(msg: Any) -> bool:
+    """True when a user message carries only tool_result blocks.
+
+    Anthropic puts tool results in a *user* role message, so "last user
+    message" is not necessarily the start of a new conversational turn.
+    """
+    content = (
+        msg.get("content")
+        if isinstance(msg, dict)
+        else getattr(msg, "content", None)
+    )
+    if not isinstance(content, list) or not content:
+        return False
+    for block in content:
+        block_type = (
+            block.get("type")
+            if isinstance(block, dict)
+            else getattr(block, "type", None)
+        )
+        if block_type != "tool_result":
+            return False
+    return True
+
+
 def convert_anthropic_to_openai(
     anthropic_params: MessageCreateParams,
     enabled_server_tools: list[type] | None = None,
@@ -286,20 +310,27 @@ def convert_anthropic_to_openai(
     if messages:
         # Reasoning replay policy: providers disagree about how much prior
         # thinking to send back (see thinking_policy.py).
+        #
+        # "turn" means the *current* turn, not the last assistant message:
+        # within a tool loop an Anthropic request contains several assistant
+        # messages (one per tool call) with tool_result user messages between
+        # them. Strict providers (DeepSeek V4 / Kimi / GLM) require reasoning on
+        # every one of those, so we keep everything after the last real user
+        # input and drop the previous turns.
         effective_policy = resolve_policy(thinking_history, model)
-        last_assistant_index = -1
+        turn_start = 0
         for index, candidate in enumerate(messages):
             role = (
                 candidate.get("role")
                 if isinstance(candidate, dict)
                 else getattr(candidate, "role", None)
             )
-            if role == "assistant":
-                last_assistant_index = index
+            if role == "user" and not _is_tool_result_only(candidate):
+                turn_start = index + 1
 
         for index, msg in enumerate(messages):
             keep_thinking = effective_policy == "keep" or (
-                effective_policy == "turn" and index == last_assistant_index
+                effective_policy == "turn" and index >= turn_start
             )
             converted_messages, msg_has_thinking = _convert_anthropic_message_to_openai(
                 msg, keep_thinking=keep_thinking

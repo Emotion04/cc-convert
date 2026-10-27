@@ -76,7 +76,8 @@ class TestLearning:
         assert tp.learned_policy("m") is None
 
 
-def _conversation():
+def _multi_turn():
+    """Two finished turns and a new user input — all prior reasoning is old."""
     return [
         {"role": "user", "content": "hi"},
         {
@@ -98,6 +99,56 @@ def _conversation():
     ]
 
 
+def _tool_loop():
+    """One user turn with two tool-call steps (tool results are user messages)."""
+    return [
+        {"role": "user", "content": "do it"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "t1"},
+                {
+                    "type": "tool_use",
+                    "id": "call_1",
+                    "name": "bash",
+                    "input": {"cmd": "ls"},
+                },
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "call_1", "content": "ok"}
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "t2"},
+                {
+                    "type": "tool_use",
+                    "id": "call_2",
+                    "name": "bash",
+                    "input": {"cmd": "pwd"},
+                },
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "call_2", "content": "ok"}
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "t3"},
+                {"type": "text", "text": "done"},
+            ],
+        },
+    ]
+
+
 def _replayed(params):
     return [
         m.get("reasoning_content")
@@ -107,30 +158,37 @@ def _replayed(params):
 
 
 class TestConverterHistory:
-    def _convert(self, mode, model="some-model"):
+    def _convert(self, mode, messages, model="some-model"):
         return convert_anthropic_to_openai(
-            {"model": model, "max_tokens": 16, "messages": _conversation()},
+            {"model": model, "max_tokens": 16, "messages": messages},
             thinking_history=mode,
         )
 
-    def test_turn_keeps_only_last_assistant_thinking(self):
-        assert _replayed(self._convert("turn")) == ["second-thought"]
+    def test_turn_drops_previous_conversation_turns(self):
+        assert _replayed(self._convert("turn", _multi_turn())) == []
+
+    def test_turn_keeps_every_assistant_in_the_current_tool_loop(self):
+        # DeepSeek V4 / Kimi / GLM need reasoning on each tool-call message,
+        # not just the last one.
+        assert _replayed(self._convert("turn", _tool_loop())) == ["t1", "t2", "t3"]
 
     def test_keep_replays_everything(self):
-        assert _replayed(self._convert("keep")) == [
+        assert _replayed(self._convert("keep", _multi_turn())) == [
             "first-thought",
             "second-thought",
         ]
 
     def test_drop_replays_nothing(self):
-        assert _replayed(self._convert("drop")) == []
+        assert _replayed(self._convert("drop", _tool_loop())) == []
 
     def test_rules_drop_for_r1(self):
-        assert _replayed(self._convert("rules", model="deepseek-r1")) == []
+        assert _replayed(self._convert("rules", _multi_turn(), "deepseek-r1")) == []
 
     def test_rules_turn_for_v4(self):
-        assert _replayed(self._convert("rules", model="deepseek-v4.1")) == [
-            "second-thought"
+        assert _replayed(self._convert("rules", _tool_loop(), "deepseek-v4.1")) == [
+            "t1",
+            "t2",
+            "t3",
         ]
 
 

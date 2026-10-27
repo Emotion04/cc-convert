@@ -108,12 +108,13 @@
                             class="input-field w-full px-4 py-2.5 rounded-xl text-sm text-stone-800">
                         <option value="upstream">遵循上游（推荐：内置规则 + 依据 400 自动调整）</option>
                         <option value="rules">按内置规则（根据模型厂商）</option>
-                        <option value="turn">仅当前轮（最后一次 assistant）</option>
+                        <option value="turn">仅当前轮（含整条工具调用链）</option>
                         <option value="keep">全部回传</option>
                         <option value="drop">全部丢弃</option>
                     </select>
                     <p class="text-xs text-stone-400 mt-1.5">
-                        默认只回传最后一次 assistant 的推理：满足需要工具轮回传的上游，同时避免每轮重发全部历史推理。
+                        「仅当前轮」回传最后一次用户输入之后的**全部** assistant 推理（包括多步工具调用），
+                        更早轮次全部丢弃：满足需要工具轮回传的上游，同时避免重发历史推理。
                     </p>
                 </div>
 
@@ -237,7 +238,7 @@
             <p class="text-xs leading-relaxed text-stone-500 mb-4">
                 上游没有标准化接口可以查询这项策略，因此「遵循上游」以官方文档整理的内置规则为准，
                 并在收到与推理相关的 400 时自动调整后续请求。
-                <code class="font-mono">turn</code> 表示只回传最后一次 assistant 消息的推理。
+                <code class="font-mono">turn</code> 表示只回传「当前轮」的推理：最后一次用户输入之后的全部 assistant 消息（含多步工具调用），更早轮次丢弃。
             </p>
             <div class="space-y-3">
                 {% for note in provider_notes %}

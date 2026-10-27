@@ -11,14 +11,16 @@ Providers disagree, and some of them fail hard when the guess is wrong:
   stripped server-side anyway.
 * OpenAI reasoning items are only needed inside the current tool loop.
 
-Keeping reasoning for the **last assistant message only** ("turn") satisfies
-the strict providers without resending the whole conversation's reasoning,
-which is the behaviour of most gateways.
+Keeping reasoning for the **current turn** ("turn") satisfies the strict
+providers without resending the whole conversation's reasoning. "Turn" means
+every assistant message after the last real user input — in a tool loop that
+is several messages, one per tool call, and DeepSeek V4 / Kimi / GLM require
+reasoning on each of them.
 
 Modes:
     upstream  - built-in rules, plus learning from reasoning-related 400s
     rules     - built-in rules only
-    turn      - last assistant message only
+    turn      - the current turn only (whole tool loop)
     keep      - every assistant message
     drop      - never send reasoning back
 """
