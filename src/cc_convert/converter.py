@@ -23,6 +23,11 @@ from openai.types.chat import (
 from openai.types.chat.completion_create_params import CompletionCreateParams
 
 from cc_convert.protocol import UsageWithCache
+from cc_convert.utils.tokens import (
+    anthropic_input_tokens,
+    extract_cache_creation_tokens,
+    extract_cache_read_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -751,14 +756,14 @@ def convert_openai_to_anthropic(
     usage_dict = None
     if completion.usage:
         usage_dict = {
-            "input_tokens": completion.usage.prompt_tokens,
+            # Anthropic input_tokens excludes cached tokens; OpenAI's
+            # prompt_tokens includes them.
+            "input_tokens": anthropic_input_tokens(completion.usage),
             "output_tokens": completion.usage.completion_tokens,
-            "cache_creation_input_tokens": getattr(
-                completion.usage, "cache_creation_input_tokens", None
+            "cache_creation_input_tokens": extract_cache_creation_tokens(
+                completion.usage
             ),
-            "cache_read_input_tokens": getattr(
-                completion.usage, "cache_read_input_tokens", None
-            ),
+            "cache_read_input_tokens": extract_cache_read_tokens(completion.usage),
         }
 
     # Build message dict to avoid Pydantic validation issues

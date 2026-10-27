@@ -9,9 +9,11 @@ import os
 import secrets
 import sys
 import warnings
+from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,25 +21,40 @@ from fastapi.responses import JSONResponse
 
 from cc_convert import __version__
 from cc_convert.config import Settings, get_config_file, get_settings
+from cc_convert.launcher import INTERNAL_ARGS as _INTERNAL_ARGS
 from cc_convert.protocol import AnthropicError, AnthropicErrorResponse
-from cc_convert.router import openai_router, router
+from cc_convert.router import build_upstream_timeout, openai_router, router
+from cc_convert.runtime_paths import get_log_dir
 from cc_convert.runtime_state import InstanceRuntimeState
 from cc_convert.web import web_router
 
 
 def get_default_log_dir() -> str:
-    """Get default log directory based on platform.
+    """Get default log directory.
+
+    Delegates to :func:`cc_convert.runtime_paths.get_log_dir`, so the directory
+    sits under the runtime directory and follows ``CCCONVERT_RUNTIME_DIR``.
 
     Returns:
         Path to log directory
     """
-    if sys.platform == 'win32':
-        # Windows: use %LOCALAPPDATA%\cc-convert\logs
-        base_dir = os.environ.get('LOCALAPPDATA', os.path.expanduser('~\\AppData\\Local'))
-        return os.path.join(base_dir, 'cc-convert', 'logs')
-    else:
-        # macOS/Linux: use ~/.local/share/cc-convert/logs
-        return os.path.expanduser("~/.local/share/cc-convert/logs")
+    return str(get_log_dir())
+
+
+def _close_logger_handlers(logger: logging.Logger) -> None:
+    """Remove and close every handler attached to ``logger``.
+
+    Handlers must be *closed*, not merely dropped: a file handler whose
+    reference is discarded keeps its file open until garbage collection,
+    which on Windows blocks deleting or rotating the log directory.
+    """
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            # Closing must never prevent the application from starting.
+            pass
 
 
 def setup_logging(log_level: str, log_dir: str | None = None) -> None:
@@ -69,8 +86,8 @@ def setup_logging(log_level: str, log_dir: str | None = None) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper()))
 
-    # Clear existing handlers
-    root_logger.handlers = []
+    # Clear existing handlers, closing them so their files are released.
+    _close_logger_handlers(root_logger)
 
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
@@ -101,9 +118,13 @@ def setup_logging(log_level: str, log_dir: str | None = None) -> None:
     api_handler.setFormatter(logging.Formatter("%(message)s"))
     api_handler.setLevel(getattr(logging, log_level.upper()))
 
-    # Create dedicated API logger
+    # Create dedicated API logger.
+    # Must be cleared first: addHandler appends, so repeated setup_logging
+    # calls would otherwise stack a new api.log handler each time and
+    # duplicate every api log line (and leak a file handle per call).
     api_logger = logging.getLogger("api")
     api_logger.setLevel(getattr(logging, log_level.upper()))
+    _close_logger_handlers(api_logger)
     api_logger.addHandler(api_handler)
     api_logger.propagate = False  # Don't propagate to root logger
 
@@ -140,12 +161,26 @@ def create_proxy_app(settings: Settings, instance_id: str, internal_token: str, 
     Returns:
         Configured FastAPI application for the proxy worker
     """
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # One connection pool per worker for its whole lifetime: TCP and TLS
+        # setup to the upstream is reused instead of being paid on every
+        # request. Also bounds the number of open sockets to this pool.
+        app.state.http_client = httpx.AsyncClient(
+            timeout=build_upstream_timeout(settings)
+        )
+        try:
+            yield
+        finally:
+            await app.state.http_client.aclose()
+
     app = FastAPI(
         title="CC Convert Proxy Worker",
         description="A proxy server that converts Anthropic Messages API to OpenAI API",
         version=__version__,
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # Store settings and instance metadata in app state
@@ -389,8 +424,47 @@ def run_foreground(settings: Settings) -> None:
     )
 
 
+def _print_instance_status(store) -> None:
+    """Print one line per configured instance with its running state."""
+    if not store.instances:
+        return
+
+    from cc_convert import daemon
+    from cc_convert.runtime_paths import get_instance_pid_file
+
+    for inst in store.instances:
+        pid_file = get_instance_pid_file(inst.id)
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                running = daemon._is_process_running(pid)
+            except (ValueError, OSError):
+                running = False
+        else:
+            running = daemon._is_port_in_use(inst.port)
+        state = "running" if running else "stopped"
+        print(f"  {inst.name}: {state} (port {inst.port})")
+
+
 def main() -> None:
     """Main entry point with subcommand support."""
+    # Frozen builds have no .py files to execute, so they re-enter the runner
+    # entry points through these internal arguments (see launcher.py). Handled
+    # before argparse so they never show up in --help.
+    if len(sys.argv) > 1:
+        internal = sys.argv[1]
+        if internal in _INTERNAL_ARGS.values():
+            sys.argv = [sys.argv[0]]
+            if internal == _INTERNAL_ARGS["daemon"]:
+                from cc_convert.daemon_runner import run_manager
+
+                run_manager()
+            else:
+                from cc_convert.worker_runner import run_worker
+
+                run_worker()
+            return
+
     # Create main parser
     parser = argparse.ArgumentParser(
         prog="ccconvert",
@@ -480,25 +554,38 @@ Examples:
 
         store = load_profile_store()
         port = args.port or store.manager.port
+
+        # `start` is idempotent: "ensure a manager is running". When one is
+        # already up, the desired state is already satisfied, so this is a
+        # success. It used to return False and exit 1, which made the launch
+        # scripts report failure on a perfectly healthy setup.
+        already_running, pid, config = daemon.get_status()
+        if already_running:
+            from cc_convert.process_info import process_name
+
+            actual_port = (config or {}).get("port", port)
+            # Shows which build owns the manager: ccconvert.exe (packaged) or
+            # python.exe (source checkout).
+            origin = process_name(pid) or "another process"
+            print(f"Manager already running (PID {pid}, {origin}), nothing to do")
+            print(f"Dashboard: http://127.0.0.1:{actual_port}")
+            _print_instance_status(store)
+            print()
+            print(
+                "An existing manager is already serving requests. "
+                "Run 'ccconvert restart' to replace it with this one."
+            )
+            sys.exit(0)
+
         success = daemon.start_daemon(port=port)
         if success:
-            print(f"Dashboard: http://127.0.0.1:{port}")
-            # Print running instance ports
-            if store.instances:
-                from cc_convert.runtime_paths import get_instance_pid_file
-
-                for inst in store.instances:
-                    pid_file = get_instance_pid_file(inst.id)
-                    if pid_file.exists():
-                        try:
-                            pid = int(pid_file.read_text().strip())
-                            running = daemon._is_process_running(pid)
-                        except (ValueError, OSError):
-                            running = False
-                    else:
-                        running = daemon._is_port_in_use(inst.port)
-                    status = "running" if running else "stopped"
-                    print(f"  {inst.name}: {status} (port {inst.port})")
+            # start_daemon moves to a different port when the configured one is
+            # already taken, so read back where it actually landed. Printing the
+            # port we asked for could send the user to a *different* manager.
+            _, _, actual_config = daemon.get_status()
+            actual_port = (actual_config or {}).get("port", port)
+            print(f"Dashboard: http://127.0.0.1:{actual_port}")
+            _print_instance_status(store)
         sys.exit(0 if success else 1)
 
     elif args.command == "stop":
@@ -512,8 +599,10 @@ Examples:
         if success:
             from cc_convert.profile_store import load_profile_store
             store = load_profile_store()
-            port = store.manager.port
+            _, _, actual_config = daemon.get_status()
+            port = (actual_config or {}).get("port", store.manager.port)
             print(f"Dashboard: http://127.0.0.1:{port}")
+            _print_instance_status(store)
         sys.exit(0 if success else 1)
 
     elif args.command == "status":
@@ -532,19 +621,7 @@ Examples:
             if store.instances:
                 print()
                 print("Instances:")
-                from cc_convert.runtime_paths import get_instance_pid_file
-                for inst in store.instances:
-                    pid_file = get_instance_pid_file(inst.id)
-                    if pid_file.exists():
-                        try:
-                            pid = int(pid_file.read_text().strip())
-                            inst_running = daemon._is_process_running(pid)
-                        except (ValueError, OSError):
-                            inst_running = False
-                    else:
-                        inst_running = daemon._is_port_in_use(inst.port)
-                    status = "running" if inst_running else "stopped"
-                    print(f"  {inst.name}: {status} (port {inst.port})")
+                _print_instance_status(store)
         except Exception:
             pass
 

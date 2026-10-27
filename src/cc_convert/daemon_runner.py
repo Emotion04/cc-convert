@@ -18,7 +18,7 @@ import uvicorn
 
 from cc_convert.main import create_manager_app
 from cc_convert.profile_store import load_profile_store
-from cc_convert.runtime_paths import get_manager_log_dir, get_runtime_dir
+from cc_convert.runtime_paths import get_manager_log_file, get_runtime_dir
 from cc_convert.supervisor import InstanceSupervisor
 
 
@@ -63,10 +63,12 @@ def run_manager() -> None:
         log_message(f"Loaded ProfileStore (revision {store.revision})")
         log_message(f"Manager port: {manager_port}")
 
-        # 2. Set up logging to manager log file
-        log_dir = get_manager_log_dir()
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "manager.log"
+        # 2. Set up logging to the manager log file. This must be the same file
+        #    daemon.start_daemon redirects this process's stdout to, so that
+        #    `ccconvert logs` (which reads that file) shows application errors
+        #    and warnings and not just the process's raw output.
+        log_file = get_manager_log_file()
+        log_file.parent.mkdir(parents=True, exist_ok=True)
 
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.INFO)

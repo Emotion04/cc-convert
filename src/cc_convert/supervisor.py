@@ -17,6 +17,7 @@ from typing import Optional
 
 import httpx
 
+from cc_convert.launcher import runner_command
 from cc_convert.profile_store import (
     InstanceProfile,
     ProfileStore,
@@ -28,6 +29,8 @@ from cc_convert.runtime_paths import (
     get_instance_meta_file,
     get_instance_pid_file,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -81,29 +84,9 @@ def _find_pid_by_port(port: int) -> Optional[int]:
 
 def _process_name(pid: int) -> str:
     """Return a short process name for *pid* (best-effort)."""
-    try:
-        if platform.system() == "Windows":
-            result = subprocess.run(
-                ["wmic", "process", "where", f"ProcessId={pid}", "get", "Name", "/value"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            for line in result.stdout.splitlines():
-                if "=" in line:
-                    return line.split("=", 1)[1].strip()
-        else:
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "comm="],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.stdout.strip():
-                return result.stdout.strip().split()[0]
-    except (subprocess.SubprocessError, OSError):
-        pass
-    return ""
+    from cc_convert.process_info import process_name
+
+    return process_name(pid)
 
 
 def _upstream_reachable(upstream_base_url: str, timeout: float = 3.0) -> bool:
@@ -196,9 +179,8 @@ class InstanceSupervisor:
         # 4. Generate internal token for health-check authentication.
         internal_token = secrets.token_urlsafe(32)
 
-        # 5. Spawn worker_runner.py as a child process.
-        worker_runner_path = Path(__file__).parent / "worker_runner.py"
-
+        # 5. Spawn the worker as a child process. In a frozen build this
+        # re-executes the bundled binary (see launcher.py).
         env = os.environ.copy()
         # Only pass PYTHONPATH — secrets go through stdin, never env vars.
         # supervisor.py lives at <src>/cc_convert/, so the package
@@ -214,7 +196,7 @@ class InstanceSupervisor:
 
         try:
             proc = subprocess.Popen(
-                [sys.executable, str(worker_runner_path)],
+                runner_command("worker"),
                 env=env,
                 stdin=subprocess.PIPE,
                 # Worker logs to its own files; discard stdout so the pipe
@@ -403,7 +385,14 @@ class InstanceSupervisor:
                     from cc_convert.profile_store import save_profile_store
                     save_profile_store(self._store)
                 except Exception:
-                    pass
+                    # The instance did restart successfully, so this remains a
+                    # success for the caller — reporting failure here would show
+                    # the UI an error while the proxy is actually running on the
+                    # new port. But the change is lost on next restart, so say so.
+                    logger.exception(
+                        "Instance %s restarted but its config was not persisted",
+                        instance_id,
+                    )
                 return {"success": True}
 
             # Rollback: restore old config, restart old instance.
@@ -426,7 +415,12 @@ class InstanceSupervisor:
                 from cc_convert.profile_store import save_profile_store
                 save_profile_store(self._store)
             except Exception:
-                pass
+                # See the note above: the new port is live, so this stays a
+                # success — but the change will not survive a restart.
+                logger.exception(
+                    "Instance %s moved ports but its config was not persisted",
+                    instance_id,
+                )
             return {"success": True}
 
     # ------------------------------------------------------------------
@@ -517,8 +511,11 @@ class InstanceSupervisor:
             if inst.auto_start:
                 ok = await self.start_instance(inst)
                 if not ok:
-                    # Log and continue.
-                    pass
+                    # Log and continue. Previously a bare `pass`, which made
+                    # every auto-start failure on manager boot invisible.
+                    logger.warning(
+                        "Auto-start failed for instance %s (%s)", inst.id, inst.name
+                    )
 
     async def shutdown_all(self) -> None:
         """Stop every running instance and clean up."""

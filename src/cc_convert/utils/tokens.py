@@ -29,6 +29,62 @@ def _normalize_usage(usage: dict[str, Any] | None) -> dict[str, Any] | None:
     return normalized or None
 
 
+def _usage_get(usage: Any, name: str) -> Any:
+    """Read a field from a usage dict or an OpenAI SDK usage object."""
+    if usage is None:
+        return None
+    if isinstance(usage, dict):
+        return usage.get(name)
+    return getattr(usage, name, None)
+
+
+def extract_cache_read_tokens(usage: Any) -> int | None:
+    """Return the number of prompt tokens served from cache.
+
+    OpenAI-compatible providers disagree about where they report this:
+
+    * OpenAI / vLLM / SGLang: ``prompt_tokens_details.cached_tokens``
+    * DeepSeek:               ``prompt_cache_hit_tokens``
+    * some vLLM builds:       ``cache_read_input_tokens``
+
+    The value is a *subset* of ``prompt_tokens``. Anthropic reports it as a
+    separate field, so callers must subtract it — see
+    :func:`anthropic_input_tokens`.
+    """
+    details = _usage_get(usage, "prompt_tokens_details")
+    for value in (
+        _usage_get(details, "cached_tokens"),
+        _usage_get(usage, "prompt_cache_hit_tokens"),
+        _usage_get(usage, "cache_read_input_tokens"),
+    ):
+        if isinstance(value, int) and value > 0:
+            return value
+    return None
+
+
+def extract_cache_creation_tokens(usage: Any) -> int | None:
+    """Return tokens written to the cache, when the provider reports them."""
+    value = _usage_get(usage, "cache_creation_input_tokens")
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def anthropic_input_tokens(usage: Any, fallback: int = 0) -> int:
+    """Convert an OpenAI ``prompt_tokens`` into Anthropic ``input_tokens``.
+
+    OpenAI counts cached tokens *inside* ``prompt_tokens``; Anthropic reports
+    ``input_tokens``, ``cache_read_input_tokens`` and
+    ``cache_creation_input_tokens`` as separate, additive fields. Passing the
+    OpenAI number straight through double-counted every cached token.
+    """
+    prompt = _usage_get(usage, "prompt_tokens")
+    if not isinstance(prompt, int):
+        prompt = fallback
+    cached = (extract_cache_read_tokens(usage) or 0) + (
+        extract_cache_creation_tokens(usage) or 0
+    )
+    return max(0, prompt - cached)
+
+
 def _count_tokens(text: str) -> int:
     try:
         import tiktoken  # type: ignore[import-not-found]

@@ -5,34 +5,19 @@ FastAPI router for Anthropic-compatible Messages API.
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Any, AsyncGenerator, cast
 
 import httpx
 
+# Fallback used when no Settings object is available (tests, embedders).
+# The live path builds its timeout from Settings.request_timeout instead.
 _HTTPX_TIMEOUT = httpx.Timeout(connect=15.0, read=300.0, write=30.0, pool=10.0)
 
-
-def _upstream_url(settings: Settings, endpoint: str) -> str:
-    """Build the upstream URL for a given endpoint, respecting upstream_format.
-
-    When ``upstream_format`` is ``"responses"``, routes Anthropic /v1/messages
-    through the upstream's /v1/responses endpoint (with conversion).
-    ``"chat_completions"`` (default) uses /v1/chat/completions.
-    """
-    base = settings.openai_base_url.rstrip("/")
-    fmt = getattr(settings, "upstream_format", "chat_completions") or "chat_completions"
-
-    if endpoint == "messages":
-        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
-    if endpoint == "chat_completions":
-        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
-    if endpoint == "responses":
-        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
-    # models, etc
-    return f"{base}/{endpoint}"
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.requests import ClientDisconnect
 
 from cc_convert.config import Settings, get_settings
 from cc_convert.converter import (
@@ -59,6 +44,117 @@ from cc_convert.utils import (
     _generate_server_tool_id,
     _normalize_usage,
 )
+
+
+def describe_upstream_error(exc: Exception, url: str) -> str:
+    """Describe a failed upstream request without ever producing an empty message.
+
+    ``str(ConnectError)`` is "", so these paths used to return
+    ``502 {"type":"connection_error","message":""}`` — a response the user can
+    neither understand nor act on. The host is included because that is what
+    the user needs in order to check the network path.
+    """
+    host = url.split("/")[2] if url.count("/") >= 2 else url
+    detail = str(exc) or "no details from the client library"
+    return (
+        f"Upstream connection failed ({type(exc).__name__}: {detail}). "
+        f"Check the network path from this machine to {host}."
+    )
+
+
+def _describe_body_error(exc: Exception) -> tuple[int, str]:
+    """Classify a failure while reading the request body.
+
+    ``ClientDisconnect`` means the client went away before the body was fully
+    received. That is not an invalid request: reporting it as a 400 with
+    ``str(exc)`` left ``message`` empty (the exception has no message text),
+    which surfaced to the user as "400 ... message: ''".
+
+    Any other failure keeps the exception type in the message, so an empty
+    message can never be produced again.
+    """
+    if isinstance(exc, ClientDisconnect):
+        return 499, "Client closed the connection before the request body was received"
+
+    detail = str(exc)
+    return 400, f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+
+def build_upstream_timeout(settings: Settings | None) -> httpx.Timeout:
+    """Build the upstream timeout, honouring ``settings.request_timeout``.
+
+    This used to be a module-level constant, so changing ``request_timeout``
+    (either in config.toml or per instance) had no effect on the proxy path.
+    """
+    read = getattr(settings, "request_timeout", None) if settings else None
+    try:
+        read = float(read) if read is not None else 300.0
+    except (TypeError, ValueError):
+        read = 300.0
+    return httpx.Timeout(connect=15.0, read=read, write=30.0, pool=10.0)
+
+
+def _get_http_client(request: Request) -> tuple[httpx.AsyncClient, bool]:
+    """Return ``(client, owned)`` for the current request.
+
+    Workers keep one ``AsyncClient`` on ``app.state`` for the process lifetime,
+    so TCP connections and TLS sessions are reused across requests instead of
+    being re-established on every call. ``owned`` is True only for the fallback
+    client created here, which the caller must close.
+    """
+    state = getattr(getattr(request, "app", None), "state", None)
+    client = getattr(state, "http_client", None)
+    if client is not None:
+        return client, False
+    settings = getattr(state, "settings", None)
+    return httpx.AsyncClient(timeout=build_upstream_timeout(settings)), True
+
+
+@asynccontextmanager
+async def _client_scope(request: Request):
+    """Yield an HTTP client, closing it only if this request created it."""
+    client, owned = _get_http_client(request)
+    try:
+        yield client
+    finally:
+        if owned:
+            await client.aclose()
+
+
+async def _closing_stream(agen, client: httpx.AsyncClient, owned: bool):
+    """Yield from *agen*, closing *client* afterwards when we own it.
+
+    Streaming responses outlive the handler, so the read loop below cannot use
+    ``_client_scope``; without this wrapper a per-request client (and its
+    connection pool) was never released.
+    """
+    try:
+        async for chunk in agen:
+            yield chunk
+    finally:
+        if owned:
+            await client.aclose()
+
+
+def _upstream_url(settings: Settings, endpoint: str) -> str:
+    """Build the upstream URL for a given endpoint, respecting upstream_format.
+
+    When ``upstream_format`` is ``"responses"``, routes Anthropic /v1/messages
+    through the upstream's /v1/responses endpoint (with conversion).
+    ``"chat_completions"`` (default) uses /v1/chat/completions.
+    """
+    base = settings.openai_base_url.rstrip("/")
+    fmt = getattr(settings, "upstream_format", "chat_completions") or "chat_completions"
+
+    if endpoint == "messages":
+        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
+    if endpoint == "chat_completions":
+        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
+    if endpoint == "responses":
+        return f"{base}/responses" if fmt == "responses" else f"{base}/chat/completions"
+    # models, etc
+    return f"{base}/{endpoint}"
+
 
 logger = logging.getLogger(__name__)
 api_logger = logging.getLogger("api")
@@ -158,11 +254,12 @@ async def create_message(
         )
         return JSONResponse(status_code=400, content=error_response.model_dump())
     except Exception as e:
-        logger.error(f"Failed to parse request body: {e}")
+        status, message = _describe_body_error(e)
+        logger.error(f"Failed to parse request body: {message}")
         error_response = AnthropicErrorResponse(
-            error=AnthropicError(type="invalid_request_error", message=str(e))
+            error=AnthropicError(type="invalid_request_error", message=message)
         )
-        return JSONResponse(status_code=400, content=error_response.model_dump())
+        return JSONResponse(status_code=status, content=error_response.model_dump())
 
     # Validate request shape early (avoid making upstream calls for obviously invalid requests)
     if not isinstance(anthropic_params, dict):
@@ -267,13 +364,17 @@ async def create_message(
         return result
 
     if stream:
-        client = httpx.AsyncClient(timeout=_HTTPX_TIMEOUT)
+        client, owned = _get_http_client(request)
         return StreamingResponse(
-            _stream_response(client, url, headers, openai_params, model),
+            _closing_stream(
+                _stream_response(client, url, headers, openai_params, model),
+                client,
+                owned,
+            ),
             media_type="text/event-stream",
         )
     else:
-        async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
+        async with _client_scope(request) as client:
             try:
                 response = await client.post(url, headers=headers, json=openai_params)
 
@@ -357,8 +458,10 @@ async def create_message(
                     content=error_response.model_dump(),
                 )
             except httpx.RequestError as e:
+                message = describe_upstream_error(e, url)
+                logger.error("[Anthropic] %s", message)
                 error_response = AnthropicErrorResponse(
-                    error=AnthropicError(type="connection_error", message=str(e))
+                    error=AnthropicError(type="connection_error", message=message)
                 )
                 return JSONResponse(
                     status_code=HTTPStatus.BAD_GATEWAY,
@@ -387,8 +490,12 @@ async def list_models(
                 content=response.json(),
             )
         except httpx.RequestError as e:
+            message = describe_upstream_error(
+                e, f"{settings.openai_base_url.rstrip('/')}/models"
+            )
+            logger.error("[Models] %s", message)
             error_response = AnthropicErrorResponse(
-                error=AnthropicError(type="connection_error", message=str(e))
+                error=AnthropicError(type="connection_error", message=message)
             )
             raise HTTPException(
                 status_code=HTTPStatus.BAD_GATEWAY,
@@ -419,10 +526,12 @@ async def count_tokens(
         )
         return JSONResponse(status_code=400, content=error_response.model_dump())
     except Exception as e:
+        status, message = _describe_body_error(e)
+        logger.error(f"Failed to parse count_tokens request body: {message}")
         error_response = AnthropicErrorResponse(
-            error=AnthropicError(type="invalid_request_error", message=str(e))
+            error=AnthropicError(type="invalid_request_error", message=message)
         )
-        return JSONResponse(status_code=400, content=error_response.model_dump())
+        return JSONResponse(status_code=status, content=error_response.model_dump())
 
     # Validate required fields
     if not isinstance(body_json, dict):
@@ -553,10 +662,11 @@ async def openai_chat_completions(
             content={"error": {"message": f"Invalid JSON: {e}", "type": "invalid_request_error"}},
         )
     except Exception as e:
-        logger.error(f"Failed to parse passthrough request body: {e}")
+        status, message = _describe_body_error(e)
+        logger.error(f"Failed to parse passthrough request body: {message}")
         return JSONResponse(
-            status_code=400,
-            content={"error": {"message": str(e), "type": "invalid_request_error"}},
+            status_code=status,
+            content={"error": {"message": message, "type": "invalid_request_error"}},
         )
 
     url = _upstream_url(settings, "chat_completions")
@@ -569,13 +679,17 @@ async def openai_chat_completions(
     stream = body_json.get("stream", False)
 
     if stream:
-        client = httpx.AsyncClient(timeout=_HTTPX_TIMEOUT)
+        client, owned = _get_http_client(request)
         return StreamingResponse(
-            _openai_stream_proxy(client, url, headers, body_json),
+            _closing_stream(
+                _openai_stream_proxy(client, url, headers, body_json),
+                client,
+                owned,
+            ),
             media_type="text/event-stream",
         )
 
-    async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
+    async with _client_scope(request) as client:
         try:
             response = await client.post(url, headers=headers, json=body_json)
 
@@ -608,9 +722,11 @@ async def openai_chat_completions(
                 content={"error": {"message": "Request timed out", "type": "timeout_error"}},
             )
         except httpx.RequestError as e:
+            message = describe_upstream_error(e, url)
+            logger.error("[OpenAI Passthrough] %s", message)
             return JSONResponse(
                 status_code=502,
-                content={"error": {"message": str(e), "type": "connection_error"}},
+                content={"error": {"message": message, "type": "connection_error"}},
             )
 
 
@@ -679,10 +795,11 @@ async def openai_responses(
             content={"error": {"message": f"Invalid JSON: {e}", "type": "invalid_request_error"}},
         )
     except Exception as e:
-        logger.error(f"Failed to parse responses request body: {e}")
+        status, message = _describe_body_error(e)
+        logger.error(f"Failed to parse responses request body: {message}")
         return JSONResponse(
-            status_code=400,
-            content={"error": {"message": str(e), "type": "invalid_request_error"}},
+            status_code=status,
+            content={"error": {"message": message, "type": "invalid_request_error"}},
         )
 
     if not isinstance(body_json, dict):
@@ -776,13 +893,17 @@ async def openai_responses(
         )
 
     if stream:
-        client = httpx.AsyncClient(timeout=_HTTPX_TIMEOUT)
+        client, owned = _get_http_client(request)
         return StreamingResponse(
-            _stream_responses(client, url, headers, chat_params, model, instructions),
+            _closing_stream(
+                _stream_responses(client, url, headers, chat_params, model, instructions),
+                client,
+                owned,
+            ),
             media_type="text/event-stream",
         )
 
-    async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
+    async with _client_scope(request) as client:
         try:
             response = await client.post(url, headers=headers, json=chat_params)
 
@@ -837,9 +958,11 @@ async def openai_responses(
                 content={"error": {"message": "Request timed out", "type": "timeout_error"}},
             )
         except httpx.RequestError as e:
+            message = describe_upstream_error(e, url)
+            logger.error("[Responses] %s", message)
             return JSONResponse(
                 status_code=502,
-                content={"error": {"message": str(e), "type": "connection_error"}},
+                content={"error": {"message": message, "type": "connection_error"}},
             )
 
 

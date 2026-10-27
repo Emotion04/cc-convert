@@ -14,6 +14,9 @@ from cc_convert.utils.tokens import (
     _chunk_text,
     _count_tokens,
     _estimate_input_tokens,
+    anthropic_input_tokens,
+    extract_cache_creation_tokens,
+    extract_cache_read_tokens,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,20 +35,11 @@ def _extract_cache_tokens(usage: Any) -> tuple[int | None, int | None]:
     if not isinstance(usage, dict):
         return None, None
 
-    cache_read = usage.get("cache_read_input_tokens")
-    cache_creation = usage.get("cache_creation_input_tokens")
-
-    # Fallback: vLLM standard OpenAI-compatible format
-    if not cache_read:
-        details = usage.get("prompt_tokens_details") or {}
-        if isinstance(details, dict):
-            cached = details.get("cached_tokens")
-            if isinstance(cached, int) and cached > 0:
-                cache_read = cached
-
+    # Covers OpenAI/vLLM (prompt_tokens_details.cached_tokens), DeepSeek
+    # (prompt_cache_hit_tokens) and vLLM's cache_read_input_tokens.
     return (
-        cache_read if isinstance(cache_read, int) and cache_read > 0 else None,
-        cache_creation if isinstance(cache_creation, int) and cache_creation > 0 else None,
+        extract_cache_read_tokens(usage),
+        extract_cache_creation_tokens(usage),
     )
 
 
@@ -144,8 +138,9 @@ async def _stream_response(
                 if first_chunk:
                     message_id = chunk.get("id", "")
                     usage = chunk.get("usage") or {}
-                    input_tokens = usage.get("prompt_tokens", input_tokens)
                     cr_init, cc_init = _extract_cache_tokens(usage)
+                    # Anthropic input_tokens excludes cached tokens.
+                    input_tokens = anthropic_input_tokens(usage, input_tokens)
                     if cr_init is not None:
                         cache_read_input_tokens = cr_init
                     if cc_init is not None:
@@ -204,8 +199,8 @@ async def _stream_response(
                                 )
                             },
                             "usage": {
-                                "input_tokens": usage.get(
-                                    "prompt_tokens", input_tokens
+                                "input_tokens": anthropic_input_tokens(
+                                    usage, input_tokens
                                 ),
                                 "output_tokens": usage.get("completion_tokens", 0),
                                 "cache_creation_input_tokens": cache_creation_input_tokens,
@@ -380,6 +375,26 @@ async def _stream_response(
             )
             yield f"event: message_stop\ndata: {json.dumps(stop_event)}\n\n"
 
+    except httpx.RequestError as e:
+        # str(ConnectError) is empty, which used to leave the client with a
+        # blank error and the log with a bare "Stream error: ". Report the
+        # exception type and host so the failure is actually diagnosable.
+        host = url.split("/")[2] if url.count("/") >= 2 else url
+        detail = str(e) or type(e).__name__
+        logger.error(
+            "Upstream connection failed: %s: %s (host=%s url=%s)",
+            type(e).__name__, detail, host, url,
+        )
+        error_event = AnthropicErrorResponse(
+            error=AnthropicError(
+                type="api_error",
+                message=(
+                    f"Upstream connection failed ({type(e).__name__}: {detail}). "
+                    f"Check the network path from this machine to {host}."
+                ),
+            )
+        )
+        yield f"event: error\ndata: {error_event.model_dump_json()}\n\n"
     except Exception as e:
         import traceback
 

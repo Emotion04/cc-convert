@@ -23,6 +23,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+
+from cc_convert.utils.tokens import extract_cache_read_tokens
 from typing import Any, AsyncIterable
 
 from openai.types.chat import ChatCompletion
@@ -677,7 +679,10 @@ def convert_chat_completion_to_responses(
             "input_tokens": prompt,
             "output_tokens": completion_tokens,
             "total_tokens": prompt + completion_tokens,
-            "input_tokens_details": {"cached_tokens": 0},
+            # Responses input_tokens includes cached tokens, like OpenAI.
+            "input_tokens_details": {
+                "cached_tokens": extract_cache_read_tokens(completion.usage) or 0
+            },
             "output_tokens_details": {"reasoning_tokens": 0},
         }
 
@@ -782,7 +787,9 @@ async def stream_responses_from_chat_completion(
                 "input_tokens": prompt,
                 "output_tokens": comp,
                 "total_tokens": prompt + comp,
-                "input_tokens_details": {"cached_tokens": 0},
+                "input_tokens_details": {
+                    "cached_tokens": extract_cache_read_tokens(u) or 0
+                },
                 "output_tokens_details": {"reasoning_tokens": 0},
             }
 

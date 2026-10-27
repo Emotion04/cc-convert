@@ -12,16 +12,18 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from cc_convert.runtime_paths import ensure_dirs, get_runtime_dir
+from cc_convert.launcher import runner_command
+from cc_convert.runtime_paths import ensure_dirs, get_manager_log_file, get_runtime_dir
 
 # Paths (runtime_paths-based, replaces old DATA_DIR / PID_FILE / CONFIG_FILE / LOG_FILE)
 MANAGER_PID_FILE = get_runtime_dir() / "manager.pid"
 MANAGER_CONFIG_FILE = get_runtime_dir() / "manager.json"
-MANAGER_LOG_FILE = get_runtime_dir() / "manager.log"
+MANAGER_LOG_FILE = get_manager_log_file()
 
 
 def _read_pid() -> Optional[int]:
@@ -82,22 +84,70 @@ def _is_process_running(pid: int) -> bool:
 
     ``os.kill(pid, 0)`` is unreliable on Windows (always reports the process
     as gone), so query the process handle via ``OpenProcess`` there.
+
+    ``OpenProcess`` on its own is not sufficient, though: Windows keeps a
+    terminated process's object — and therefore a valid PID and a valid handle
+    — alive until every handle to it is closed. Asking for the exit code is
+    what distinguishes "alive" from "terminated but not yet reaped". Without
+    that, a force-killed manager looked alive indefinitely, its stale pidfile
+    was never cleaned up, and ``ccconvert start`` refused to start a
+    replacement.
     """
     if os.name == "nt":
         import ctypes
+        from ctypes import wintypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+
         kernel32 = ctypes.windll.kernel32
+        # Declare the signatures: without restype the 64-bit HANDLE would be
+        # truncated to a 32-bit int.
+        kernel32.OpenProcess.argtypes = [
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        ]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if handle:
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                # State unknown — treat as gone, so a stale pidfile can never
+                # block a restart.
+                return False
+            return exit_code.value == STILL_ACTIVE
+        finally:
             kernel32.CloseHandle(handle)
-            return True
-        return False
     try:
         os.kill(pid, 0)
         return True
     except (OSError, ProcessLookupError):
         return False
+
+
+def _force_kill(pid: int) -> None:
+    """Forcefully terminate *pid*.
+
+    Windows has no SIGKILL, so it shells out to ``taskkill /F`` there.
+    """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid)],
+            capture_output=True,
+            timeout=10,
+        )
+    else:
+        os.kill(pid, signal.SIGKILL)
 
 
 def _is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -146,26 +196,59 @@ def _find_pid_by_port(port: int) -> Optional[int]:
     return None
 
 
+def _can_bind(port: int, host: str) -> bool:
+    """Return True if *host*:*port* can be bound right now."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # No SO_REUSEADDR: on Windows it permits double-binding and would
+            # make the probe report an occupied port as free.
+            s.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
 def _find_free_port_from(start: int, exclude: Optional[set[int]] = None) -> Optional[int]:
     """Return the first free port scanning upward from *start*.
 
-    Uses a ``bind()`` probe rather than ``connect_ex``: connect_ex can report
-    a listener's backlog-full port as free, while bind() reliably raises
-    EADDRINUSE on any occupied port.
+    Probes by binding rather than ``connect_ex``, which can report a listener
+    with a full backlog as free.
+
+    Both the loopback and the wildcard address are probed, and *both* must
+    succeed. A single probe is not sufficient on Windows: a specific-address
+    bind (``127.0.0.1``) succeeds even while another socket holds the wildcard
+    address (``0.0.0.0``), and vice versa, because Windows lets the two coexist
+    where Linux returns EADDRINUSE. Probing only loopback previously handed
+    back the manager's own port while a manager was already listening on
+    ``0.0.0.0`` — the new manager then started on the same port as the old one.
     """
     exclude = exclude or set()
     for port in range(start, start + 2000):
         if port in exclude:
             continue
-        try:
-            # NOTE: no SO_REUSEADDR — on Windows it permits double-binding and
-            # would make the probe report an occupied port as free.
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("127.0.0.1", port))
+        if _can_bind(port, "127.0.0.1") and _can_bind(port, "0.0.0.0"):
             return port
-        except OSError:
-            continue
     return None
+
+
+#: Appears in the manager dashboard's HTML; identifies the service on a port.
+_MANAGER_MARKER = "CC Convert Manager"
+
+
+def _looks_like_manager(port: int, host: str = "127.0.0.1") -> bool:
+    """Return True if *port* is serving the CC Convert manager dashboard.
+
+    Checked before terminating a process that was located *by port*, so an
+    unrelated program which merely happens to hold the configured port is not
+    killed. A process found through the pidfile is trusted already — that file
+    is ours — but a port match alone proves nothing about ownership.
+    """
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/", timeout=3) as response:
+            body = response.read(65536).decode("utf-8", "ignore")
+    except Exception:
+        return False
+    return _MANAGER_MARKER in body
 
 
 def _cleanup_stale_pidfile() -> None:
@@ -225,7 +308,13 @@ def start_daemon(port: int | None = None) -> bool:
     # Dashboard URL stays stable for subsequent runs.
     if _is_port_in_use(port):
         print(f"Port {port} is in use, finding a free port...", file=sys.stderr)
-        new_port = _find_free_port_from(port)
+        # Never take a port this store already assigns to an instance: the
+        # manager would squat on it, the instance could never start, and the
+        # instance would still be reported "running" because something is
+        # listening on its port.
+        new_port = _find_free_port_from(
+            port, exclude={inst.port for inst in store.instances}
+        )
         if new_port is None:
             print(f"Error: no free port found starting from {port}", file=sys.stderr)
             return False
@@ -236,10 +325,10 @@ def start_daemon(port: int | None = None) -> bool:
 
     ensure_dirs()
 
-    # Prepare the command to run the daemon runner as a separate script
-    daemon_runner_path = Path(__file__).parent / "daemon_runner.py"
+    # Prepare the command to run the daemon runner as a separate process.
+    # In a frozen build this re-executes the bundled binary (see launcher.py).
     env = os.environ.copy()
-    cmd = [sys.executable, str(daemon_runner_path)]
+    cmd = runner_command("daemon")
 
     try:
         # Open log file
@@ -319,9 +408,20 @@ def stop_daemon(force: bool = False) -> bool:
         if configured_port and _is_port_in_use(configured_port):
             found = _find_pid_by_port(configured_port)
             if found is not None:
+                # A port match alone does not mean the process is ours — some
+                # unrelated program may simply hold the same port. Verify
+                # before force-killing anything.
+                if not _looks_like_manager(configured_port):
+                    print(
+                        f"Port {configured_port} is held by PID {found}, which "
+                        f"does not appear to be a CC Convert manager. Refusing "
+                        f"to stop it.",
+                        file=sys.stderr,
+                    )
+                    return False
                 print(
-                    f"Found orphaned process (PID {found}) holding port "
-                    f"{configured_port}, stopping it...",
+                    f"Found orphaned CC Convert manager (PID {found}) holding "
+                    f"port {configured_port}, stopping it...",
                     file=sys.stderr,
                 )
                 pid = found
@@ -334,18 +434,10 @@ def stop_daemon(force: bool = False) -> bool:
 
     try:
         # Send signal. Windows has no SIGKILL — use taskkill /F for force.
-        if sys.platform == "win32":
-            if force:
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=10,
-                )
-            else:
-                os.kill(pid, signal.SIGTERM)
+        if force:
+            _force_kill(pid)
         else:
-            signal_num = signal.SIGKILL if force else signal.SIGTERM
-            os.kill(pid, signal_num)
+            os.kill(pid, signal.SIGTERM)
 
         # Wait for process to terminate
         for _ in range(50):  # Wait up to 5 seconds
@@ -357,16 +449,21 @@ def stop_daemon(force: bool = False) -> bool:
             if not force:
                 print("Manager did not stop gracefully, use -f to force kill", file=sys.stderr)
                 return False
-            # Force kill — Windows has no SIGKILL, use taskkill /F.
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=10,
+            _force_kill(pid)
+            for _ in range(50):
+                if not _is_process_running(pid):
+                    break
+                time.sleep(0.1)
+            if _is_process_running(pid):
+                # Do not claim success and do not delete the pidfile: the
+                # process is still alive and still owns it. Reporting success
+                # here made a failed stop look like a clean one and destroyed
+                # the only record of the surviving process.
+                print(
+                    f"Failed to stop the manager (PID {pid}) — it is still running.",
+                    file=sys.stderr,
                 )
-            else:
-                os.kill(pid, signal.SIGKILL)
-            time.sleep(0.2)
+                return False
 
         _remove_pid()
         _remove_daemon_config()

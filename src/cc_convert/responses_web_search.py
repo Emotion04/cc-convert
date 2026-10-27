@@ -110,7 +110,15 @@ async def _run_web_search_loop(
             except httpx.TimeoutException:
                 return None, [], _error_json(504, "timeout_error", "Request timed out")
             except httpx.RequestError as e:
-                return None, [], _error_json(502, "connection_error", str(e))
+                # str(ConnectError) is empty; never return a blank message.
+                host = url.split("/")[2] if url.count("/") >= 2 else url
+                detail = str(e) or "no details from the client library"
+                return None, [], _error_json(
+                    502,
+                    "connection_error",
+                    f"Upstream connection failed ({type(e).__name__}: {detail}). "
+                    f"Check the network path from this machine to {host}.",
+                )
 
             if response.status_code != 200:
                 raw = (response.text or "").strip() or response.reason_phrase or ""

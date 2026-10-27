@@ -32,18 +32,35 @@ def get_config_file() -> Path:
 def get_runtime_dir() -> Path:
     """Get platform-specific runtime data directory.
 
+    Respects the ``CCCONVERT_RUNTIME_DIR`` environment variable.
     Windows: %LOCALAPPDATA%\\ccconvert
     POSIX:   ~/.local/share/ccconvert
 
     Returns:
         Path to the runtime data directory
     """
+    override = os.environ.get("CCCONVERT_RUNTIME_DIR")
+    if override:
+        return Path(override)
     if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
             return Path(local_app_data) / "ccconvert"
         return Path.home() / "AppData" / "Local" / "ccconvert"
     return Path.home() / ".local" / "share" / "ccconvert"
+
+
+def get_log_dir() -> Path:
+    """Get the directory holding ``server.log`` and ``api.log``.
+
+    Lives under the runtime directory so that ``CCCONVERT_RUNTIME_DIR``
+    relocates logs together with the rest of the runtime state. It previously
+    used a separately-computed path built from ``cc-convert`` (with a hyphen)
+    that honoured no override at all — so a relocated runtime still wrote its
+    logs to the real user directory, and the test suite leaked log output
+    outside its sandbox.
+    """
+    return get_runtime_dir() / "logs"
 
 
 def get_manager_state_file() -> Path:
@@ -103,13 +120,29 @@ def get_instance_meta_file(instance_id: str) -> Path:
     return get_instance_dir(instance_id) / "ccconvert.json"
 
 
-def get_manager_log_dir() -> Path:
-    """Get manager log directory.
+def get_manager_log_file() -> Path:
+    """Get the manager's log file.
+
+    Both ``daemon`` (which redirects the manager subprocess's stdout here) and
+    ``daemon_runner`` (which attaches its root file handler here) must resolve
+    this identically. They used to compute different paths — the process output
+    went to ``manager.log`` while every ``logging`` record went to
+    ``manager-logs/manager.log`` — so ``ccconvert logs``, which reads the
+    former, showed none of the application's errors or warnings.
 
     Returns:
-        Path to manager-logs under the runtime directory
+        Path to manager.log under the runtime directory
     """
-    return get_runtime_dir() / "manager-logs"
+    return get_runtime_dir() / "manager.log"
+
+
+def get_manager_log_dir() -> Path:
+    """Get the directory containing the manager log.
+
+    Returns:
+        Path to the runtime directory
+    """
+    return get_manager_log_file().parent
 
 
 def ensure_dirs() -> None:
@@ -124,9 +157,6 @@ def ensure_dirs() -> None:
     runtime_dir = get_runtime_dir()
     runtime_dir.mkdir(parents=True, exist_ok=True)
 
-    get_manager_log_dir().mkdir(parents=True, exist_ok=True)
-
     if os.name != "nt":
         config_dir.chmod(0o700)
         runtime_dir.chmod(0o700)
-        get_manager_log_dir().chmod(0o700)
