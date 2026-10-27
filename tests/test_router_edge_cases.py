@@ -317,5 +317,76 @@ class TestGetRequestSettings:
         assert isinstance(result, Settings)
 
 
+class TestDescribeUpstreamError:
+    """Upstream connection failures must never produce an empty message.
+
+    ``str(httpx.ConnectError(""))`` is "", which used to yield
+    ``502 {"type":"connection_error","message":""}`` — an error the user cannot
+    act on.
+    """
+
+    def test_connect_error_without_detail_still_explains_itself(self):
+        import httpx
+
+        from cc_convert.router import describe_upstream_error
+
+        message = describe_upstream_error(
+            httpx.ConnectError(""), "https://tryapi.tryai.chat/chat/completions"
+        )
+
+        assert message
+        assert "ConnectError" in message
+        assert "tryapi.tryai.chat" in message
+
+    def test_includes_exception_detail_when_present(self):
+        import httpx
+
+        from cc_convert.router import describe_upstream_error
+
+        message = describe_upstream_error(
+            httpx.ConnectError("TLS handshake failed"), "https://example.com/v1"
+        )
+
+        assert "TLS handshake failed" in message
+        assert "example.com" in message
+
+
+class TestDescribeBodyError:
+    """Request-body read failures must never surface an empty message.
+
+    ``str(ClientDisconnect())`` is "", which used to produce
+    ``400 {"type":"error","error":{"type":"invalid_request_error","message":""}}``
+    — an error the user cannot act on and that mislabels a client disconnect as
+    a malformed request.
+    """
+
+    def test_client_disconnect_is_not_reported_as_bad_request(self):
+        from starlette.requests import ClientDisconnect
+
+        from cc_convert.router import _describe_body_error
+
+        status, message = _describe_body_error(ClientDisconnect())
+
+        assert status == 499
+        assert message
+        assert "request body" in message
+
+    def test_generic_exception_includes_type_and_detail(self):
+        from cc_convert.router import _describe_body_error
+
+        status, message = _describe_body_error(RuntimeError("boom"))
+
+        assert status == 400
+        assert message == "RuntimeError: boom"
+
+    def test_exception_without_text_falls_back_to_type_name(self):
+        from cc_convert.router import _describe_body_error
+
+        status, message = _describe_body_error(TimeoutError())
+
+        assert status == 400
+        assert message == "TimeoutError"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -731,5 +731,61 @@ class TestAddToolResultsToMessages:
         assert "error" in result[1]["content"]
 
 
+class TestStreamCacheUsage:
+    """Cache usage from upstream must surface in Anthropic usage fields."""
+
+    @pytest.mark.asyncio
+    async def test_deepseek_cache_hit_is_reported_and_not_double_counted(self):
+        """DeepSeek reports ``prompt_cache_hit_tokens``; input_tokens excludes it.
+
+        OpenAI counts cached tokens inside prompt_tokens while Anthropic keeps
+        them separate, so forwarding the raw number double-counted them.
+        """
+        usage = {
+            "prompt_tokens": 1000,
+            "completion_tokens": 0,
+            "prompt_cache_hit_tokens": 800,
+        }
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        async def aiter_lines():
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "id": "msg_1",
+                        "choices": [{"delta": {"content": "Hi"}}],
+                        "usage": usage,
+                    }
+                )
+            )
+            yield "data: [DONE]"
+
+        mock_response.aiter_lines = aiter_lines
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(
+            return_value=async_context_manager(mock_response)
+        )
+
+        start_usage = None
+        async for chunk in _stream_response(
+            mock_client,
+            "http://test.com",
+            {"Authorization": "Bearer test"},
+            {"model": "test"},
+            "test-model",
+        ):
+            if chunk.startswith("event: message_start"):
+                payload = json.loads(chunk.split("data: ", 1)[1])
+                start_usage = payload["message"]["usage"]
+                break
+
+        assert start_usage is not None
+        assert start_usage["cache_read_input_tokens"] == 800
+        assert start_usage["input_tokens"] == 200
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

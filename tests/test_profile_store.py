@@ -60,6 +60,23 @@ class TestProfileStore:
         assert mask_api_key("ab") == "***"
         assert mask_api_key(None) is None
 
+    def test_pasted_whitespace_is_trimmed(self):
+        """Leading/trailing whitespace in pasted URL and key is removed.
+
+        Copy-pasting from a browser or chat commonly includes stray spaces. A
+        leading space made the URL fail the http:// check, and a trailing space
+        ended up inside the Authorization header.
+        """
+        inst = InstanceProfile(
+            name="test",
+            port=18001,
+            upstream_base_url="  https://api.test.com/v1/  ",
+            upstream_api_key="  sk-test1234\n",
+        )
+
+        assert inst.upstream_base_url == "https://api.test.com/v1"
+        assert inst.upstream_api_key == "sk-test1234"
+
     def test_suggest_port_avoids_manager_and_instance_ports(self, monkeypatch):
         """suggest_port excludes both manager and instance ports."""
         monkeypatch.setattr(

@@ -263,6 +263,32 @@ class TestMain:
         assert exc_info.value.code == 0
         mock_start_daemon.assert_called_once()
 
+    @patch("cc_convert.daemon.start_daemon")
+    @patch("cc_convert.daemon.get_status")
+    @patch("cc_convert.profile_store.load_profile_store")
+    def test_start_command_is_idempotent(
+        self, mock_load_store, mock_get_status, mock_start_daemon
+    ):
+        """`start` means "ensure running": already running is a success.
+
+        It previously exited 1, which made the launch scripts report failure on
+        a healthy setup and made users reach for `restart`, force-killing the
+        manager and every live instance.
+        """
+        from cc_convert.profile_store import ManagerConfig, ProfileStore
+
+        mock_load_store.return_value = ProfileStore(
+            manager=ManagerConfig(port=8080, host="127.0.0.1"), instances=[]
+        )
+        mock_get_status.return_value = (True, 1234, {"port": 8080})
+
+        with patch("sys.argv", ["ccconvert", "start"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+        assert exc_info.value.code == 0
+        mock_start_daemon.assert_not_called()
+
     @patch("cc_convert.daemon.stop_daemon")
     def test_stop_command(self, mock_stop_daemon):
         """Test stop command."""

@@ -5,54 +5,44 @@ Tests for logging functionality.
 
 import logging
 import os
-import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from cc_convert.main import get_default_log_dir, setup_logging
+from cc_convert.runtime_paths import get_runtime_dir
+from tests.logging_support import temp_log_dir
 
 
 class TestGetDefaultLogDir:
-    """Tests for get_default_log_dir function."""
+    """Tests for get_default_log_dir.
 
-    def test_windows_log_dir(self):
-        """Test Windows log directory."""
-        with patch.object(sys, "platform", "win32"):
-            with patch.dict(
-                os.environ, {"LOCALAPPDATA": "C:\\Users\\Test\\AppData\\Local"}
-            ):
-                log_dir = get_default_log_dir()
-                # Check path components exist
-                assert "C:\\Users\\Test\\AppData\\Local" in log_dir
-                assert "cc-convert" in log_dir
-                assert "logs" in log_dir
+    The log directory is derived from the runtime directory, so these assert
+    that contract rather than re-implementing the per-platform rules (which
+    live in ``runtime_paths`` and key off ``os.name``, not ``sys.platform``).
+    """
 
-    def test_windows_fallback(self):
-        """Test Windows fallback when LOCALAPPDATA not set."""
-        with patch.object(sys, "platform", "win32"):
-            with patch.dict(os.environ, {}, clear=True):
-                with patch.object(
-                    os.path, "expanduser", return_value="C:\\Users\\Test"
-                ):
-                    log_dir = get_default_log_dir()
-                    # Check path components exist
-                    assert "cc-convert" in log_dir
-                    assert "logs" in log_dir
+    def test_log_dir_is_under_runtime_dir(self):
+        """Logs live under the runtime directory."""
+        assert get_default_log_dir() == str(get_runtime_dir() / "logs")
 
-    def test_macos_log_dir(self):
-        """Test macOS log directory."""
-        with patch.object(sys, "platform", "darwin"):
-            log_dir = get_default_log_dir()
-            assert ".local/share/cc-convert/logs" in log_dir
+    def test_log_dir_follows_runtime_dir_override(self, monkeypatch, tmp_path):
+        """CCCONVERT_RUNTIME_DIR must relocate logs too.
 
-    def test_linux_log_dir(self):
-        """Test Linux log directory."""
-        with patch.object(sys, "platform", "linux"):
-            log_dir = get_default_log_dir()
-            assert ".local/share/cc-convert/logs" in log_dir
+        Regression: the log directory used to be computed independently from
+        LOCALAPPDATA under the hyphenated name "cc-convert", honouring no
+        override at all. A relocated runtime therefore still wrote its logs to
+        the real user directory, and the test suite leaked log output outside
+        its sandbox.
+        """
+        monkeypatch.setenv("CCCONVERT_RUNTIME_DIR", str(tmp_path))
+
+        assert get_default_log_dir() == str(tmp_path / "logs")
+
+    def test_log_dir_component_is_named_logs(self):
+        """The last path component is not platform dependent."""
+        assert Path(get_default_log_dir()).name == "logs"
 
 
 class TestSetupLogging:
@@ -60,7 +50,7 @@ class TestSetupLogging:
 
     def test_setup_logging_creates_directory(self):
         """Test that setup_logging creates log directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             log_dir = os.path.join(tmpdir, "logs", "subdir")
             setup_logging("INFO", log_dir)
 
@@ -69,7 +59,7 @@ class TestSetupLogging:
 
     def test_setup_logging_creates_log_file(self):
         """Test that setup_logging creates log file."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("INFO", tmpdir)
 
             log_file = os.path.join(tmpdir, "server.log")
@@ -77,7 +67,7 @@ class TestSetupLogging:
 
     def test_setup_logging_handlers(self):
         """Test that setup_logging configures handlers correctly."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("DEBUG", tmpdir)
 
             root_logger = logging.getLogger()
@@ -92,7 +82,7 @@ class TestSetupLogging:
 
     def test_setup_logging_log_level(self):
         """Test that setup_logging sets correct log level."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("WARNING", tmpdir)
 
             root_logger = logging.getLogger()
@@ -100,7 +90,7 @@ class TestSetupLogging:
 
     def test_setup_logging_file_rotation_settings(self):
         """Test that file handler has correct rotation settings."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("INFO", tmpdir)
 
             root_logger = logging.getLogger()
@@ -116,7 +106,7 @@ class TestSetupLogging:
 
     def test_setup_logging_log_format(self):
         """Test that log format is correct."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("INFO", tmpdir)
 
             # Get file handler
@@ -142,7 +132,7 @@ class TestSetupLogging:
         root_logger.addHandler(dummy_handler)
         initial_count = len(root_logger.handlers)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("INFO", tmpdir)
 
             # Should have exactly 2 handlers after setup
@@ -151,7 +141,7 @@ class TestSetupLogging:
     def test_setup_logging_with_none_log_dir(self):
         """Test setup_logging with None log_dir uses default."""
         with patch("cc_convert.main.get_default_log_dir") as mock_get_dir:
-            with tempfile.TemporaryDirectory() as tmpdir:
+            with temp_log_dir() as tmpdir:
                 mock_get_dir.return_value = tmpdir
                 setup_logging("INFO", None)
 
@@ -160,7 +150,7 @@ class TestSetupLogging:
 
     def test_setup_logging_expands_user_directory(self):
         """Test that ~ in log_dir is expanded."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             # Create a path with ~
             home = os.path.expanduser("~")
             relative_path = tmpdir.replace(home, "~")
@@ -176,7 +166,7 @@ class TestLoggingIntegration:
 
     def test_log_messages_written_to_file(self):
         """Test that log messages are written to file."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("INFO", tmpdir)
 
             # Get a logger and write messages
@@ -196,7 +186,7 @@ class TestLoggingIntegration:
 
     def test_log_level_filtering(self):
         """Test that log level filters messages correctly."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("WARNING", tmpdir)
 
             logger = logging.getLogger("test_filter")
@@ -216,7 +206,7 @@ class TestLoggingIntegration:
 
     def test_log_message_format(self):
         """Test that log messages have correct format."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with temp_log_dir() as tmpdir:
             setup_logging("INFO", tmpdir)
 
             logger = logging.getLogger("test_format")

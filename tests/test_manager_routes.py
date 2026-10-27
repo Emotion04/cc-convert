@@ -774,3 +774,33 @@ class TestPageRoutes:
         assert response.headers["content-type"].startswith("text/html")
         assert "CC Convert" in response.text
         assert "POST /v1/messages" in response.text
+
+
+class TestNormalizeInstanceFields:
+    """The dashboard trims pasted values on the client, but the API is the
+    authoritative boundary — any non-browser client gets the same treatment."""
+
+    def test_trims_url_and_key(self):
+        from cc_convert.web.routes import _normalize_instance_fields
+
+        data = {
+            "upstream_base_url": "  https://api.example.com/v1 \n",
+            "upstream_api_key": "\tsk-abc123  ",
+            "name": "  keep me  ",
+        }
+
+        _normalize_instance_fields(data)
+
+        assert data["upstream_base_url"] == "https://api.example.com/v1"
+        assert data["upstream_api_key"] == "sk-abc123"
+        # Names are intentionally left alone.
+        assert data["name"] == "  keep me  "
+
+    def test_ignores_missing_and_non_string_values(self):
+        from cc_convert.web.routes import _normalize_instance_fields
+
+        data = {"upstream_base_url": None, "upstream_api_key": 123}
+
+        _normalize_instance_fields(data)
+
+        assert data == {"upstream_base_url": None, "upstream_api_key": 123}

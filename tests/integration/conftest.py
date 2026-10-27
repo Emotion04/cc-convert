@@ -259,10 +259,18 @@ def mock_httpx_client_with_streaming(
 
 
 @pytest.fixture(autouse=True)
-def clear_tavily_client_singleton():
-    """Clear Tavily client singleton before each test."""
+def clear_web_search_client_singletons():
+    """Clear both web-search client singletons around each test.
+
+    The attribute names must match the ClassVars on ``WebSearchServerTool``
+    (``_tavily_client`` / ``_tongxiao_client``). An earlier version reset a
+    non-existent ``_client`` attribute and therefore did nothing, letting
+    clients leak across tests.
+    """
     from cc_convert.server_tools.web_search import WebSearchServerTool
 
-    WebSearchServerTool._client = None
+    WebSearchServerTool._tavily_client = None
+    WebSearchServerTool._tongxiao_client = None
     yield
-    WebSearchServerTool._client = None
+    WebSearchServerTool._tavily_client = None
+    WebSearchServerTool._tongxiao_client = None

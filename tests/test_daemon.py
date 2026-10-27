@@ -21,7 +21,7 @@ class TestEnsureDirs:
         with patch.object(Path, "mkdir") as mock_mkdir:
             with patch.object(Path, "exists", return_value=False):
                 daemon.ensure_dirs()
-                # ensure_dirs creates several directories (config, runtime, manager-logs)
+                # ensure_dirs creates the config and runtime directories
                 assert mock_mkdir.called
                 mock_mkdir.assert_called_with(parents=True, exist_ok=True)
 
@@ -134,11 +134,42 @@ class TestIsProcessRunning:
     def test_running_process(self):
         """Test checking a running process."""
         if daemon.os.name == "nt":
+
+            def _report_still_active(handle, exit_code_ptr):
+                exit_code_ptr._obj.value = 259  # STILL_ACTIVE
+                return 1
+
             with patch("ctypes.windll.kernel32.OpenProcess", return_value=0xABC):
-                assert daemon._is_process_running(12345) is True
+                with patch(
+                    "ctypes.windll.kernel32.GetExitCodeProcess",
+                    side_effect=_report_still_active,
+                ):
+                    assert daemon._is_process_running(12345) is True
         else:
             with patch("os.kill", return_value=None):
                 assert daemon._is_process_running(12345) is True
+
+    @pytest.mark.skipif(daemon.os.name != "nt", reason="Windows-only semantics")
+    def test_terminated_process_not_reported_as_running(self):
+        """A terminated process must not be reported as running.
+
+        ``OpenProcess`` also succeeds for a terminated process whose process
+        object has not been reaped yet, so the exit code has to be consulted
+        too. Relying on the handle alone made a force-killed manager look alive
+        indefinitely, which left a stale pidfile behind and blocked
+        ``ccconvert start`` from starting a replacement.
+        """
+
+        def _report_terminated(handle, exit_code_ptr):
+            exit_code_ptr._obj.value = 1  # exited; anything but STILL_ACTIVE
+            return 1
+
+        with patch("ctypes.windll.kernel32.OpenProcess", return_value=0xABC):
+            with patch(
+                "ctypes.windll.kernel32.GetExitCodeProcess",
+                side_effect=_report_terminated,
+            ):
+                assert daemon._is_process_running(12345) is False
 
     def test_not_running_process(self):
         """Test checking a non-running process."""
