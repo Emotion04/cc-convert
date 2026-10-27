@@ -311,6 +311,11 @@ class Settings(BaseSettings):
         default="chat_completions",
         description="Upstream API format: chat_completions or responses"
     )
+    thinking_history: str = Field(
+        default="upstream",
+        description="How much previous-turn reasoning to send upstream: "
+        "upstream, rules, turn, keep, drop",
+    )
     model_mapping: list[ModelMappingRule] = Field(
         default_factory=list,
         description="List of model name mapping rules (from -> to, supports * wildcards)"

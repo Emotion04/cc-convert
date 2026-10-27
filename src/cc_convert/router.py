@@ -37,6 +37,7 @@ from cc_convert.tools import (
     _add_tool_results_to_messages,
     _handle_with_server_tools,
 )
+from cc_convert.thinking_policy import note_upstream_rejection
 from cc_convert.utils.errors import upstream_diagnostic
 from cc_convert.utils import (
     _chunk_text,
@@ -319,6 +320,7 @@ async def create_message(
     openai_params_obj = convert_anthropic_to_openai(
         cast(MessageCreateParams, anthropic_params),
         enabled_server_tools=enabled_server_tools if has_server_tools else None,
+        thinking_history=settings.thinking_history,
     )
     openai_params: dict[str, Any] = dict(openai_params_obj)  # type: ignore
 
@@ -390,6 +392,10 @@ async def create_message(
                         raw_text = ""
                     if not raw_text:
                         raw_text = response.reason_phrase or ""
+                    # In "follow upstream" mode, learn from a 400 that rejects
+                    # our reasoning shape so later requests adapt.
+                    note_upstream_rejection(model, response.status_code, raw_text)
+
                     error_message = (raw_text or "").strip()
                     if not error_message:
                         error_message = f"Upstream API error ({response.status_code})"

@@ -96,6 +96,27 @@
                     </p>
                 </div>
 
+                <!-- Thinking history replay policy -->
+                <div>
+                    <label class="block text-sm font-semibold text-stone-700 mb-2 flex items-center gap-2">
+                        思考历史回传
+                        <button type="button" @click="showThinkingHelp = true"
+                                class="w-5 h-5 rounded-full bg-stone-100 text-stone-500 hover:bg-stone-200 text-[11px] font-bold cursor-pointer"
+                                title="查看各厂商做法">?</button>
+                    </label>
+                    <select x-model="formData.thinking_history"
+                            class="input-field w-full px-4 py-2.5 rounded-xl text-sm text-stone-800">
+                        <option value="upstream">遵循上游（推荐：内置规则 + 依据 400 自动调整）</option>
+                        <option value="rules">按内置规则（根据模型厂商）</option>
+                        <option value="turn">仅当前轮（最后一次 assistant）</option>
+                        <option value="keep">全部回传</option>
+                        <option value="drop">全部丢弃</option>
+                    </select>
+                    <p class="text-xs text-stone-400 mt-1.5">
+                        默认只回传最后一次 assistant 的推理：满足需要工具轮回传的上游，同时避免每轮重发全部历史推理。
+                    </p>
+                </div>
+
                 <!-- Upstream API Key -->
                 <div>
                     <label class="block text-sm font-semibold text-stone-700 mb-2">上游 API 密钥</label>
@@ -202,6 +223,40 @@
             </div>
         </div>
     </div>
+
+    <!-- Thinking-history help -->
+    <div x-show="showThinkingHelp" x-cloak
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+         @click.self="showThinkingHelp = false">
+        <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-bold text-stone-900">各厂商对历史推理的处理</h3>
+                <button @click="showThinkingHelp = false"
+                        class="text-stone-400 hover:text-stone-600 text-2xl leading-none cursor-pointer">&times;</button>
+            </div>
+            <p class="text-xs leading-relaxed text-stone-500 mb-4">
+                上游没有标准化接口可以查询这项策略，因此「遵循上游」以官方文档整理的内置规则为准，
+                并在收到与推理相关的 400 时自动调整后续请求。
+                <code class="font-mono">turn</code> 表示只回传最后一次 assistant 消息的推理。
+            </p>
+            <div class="space-y-3">
+                {% for note in provider_notes %}
+                <div class="rounded-xl border border-stone-100 p-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <span class="text-sm font-semibold text-stone-800">{{ note.provider }}</span>
+                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 font-mono">{{ note.policy }}</span>
+                    </div>
+                    <p class="text-xs text-stone-500 mt-1 leading-relaxed">{{ note.summary }}</p>
+                    <a href="{{ note.source }}" target="_blank" rel="noopener"
+                       class="text-[11px] text-brand-500 hover:underline mt-1 inline-block">来源</a>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="text-[11px] text-stone-400 mt-4">
+                整理自各厂商公开文档（2026-10）。上游策略可能变化，以实际返回为准。
+            </p>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -219,12 +274,14 @@ function instanceConfig() {
             client_haiku_model: '',
             auto_start: true,
             upstream_format: 'auto',
+            thinking_history: 'upstream',
             detected_format: '',
         },
         originalData: null,
         instanceId: null,
         isEdit: false,
         saving: false,
+        showThinkingHelp: false,
         // Backend advisory messages shown after a successful save.
         saveWarnings: [],
         showKey: false,
@@ -266,6 +323,7 @@ function instanceConfig() {
                     client_haiku_model: data.client_haiku_model || '',
                     auto_start: data.auto_start !== false,
                     upstream_format: data.upstream_format || 'auto',
+                    thinking_history: data.thinking_history || 'upstream',
                     detected_format: '',
                 };
             } catch (e) {

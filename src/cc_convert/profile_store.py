@@ -99,6 +99,10 @@ class InstanceProfile(BaseModel):
         default="auto",
         description="Upstream API format: chat_completions, responses, or auto-detect"
     )
+    thinking_history: Literal["upstream", "rules", "turn", "keep", "drop"] = Field(
+        default="upstream",
+        description="How much previous-turn reasoning to send upstream",
+    )
     auto_start: bool = True
 
     # -- validators --------------------------------------------------------
@@ -361,6 +365,7 @@ def build_worker_settings(store: ProfileStore, instance: InstanceProfile) -> dic
         "websearch_provider": store.global_websearch_provider,
         "model_mapping": [],
         "upstream_format": instance.upstream_format,
+        "thinking_history": instance.thinking_history,
     }
 
 

@@ -115,6 +115,13 @@ def _validate_instance_body(data: dict, require_key: bool = True) -> list[str]:
             errors.append("upstream_base_url must start with http:// or https://")
     if require_key and ("upstream_api_key" not in data or not data.get("upstream_api_key")):
         errors.append("upstream_api_key is required")
+    if "thinking_history" in data:
+        from cc_convert.thinking_policy import MODES
+
+        if data["thinking_history"] not in MODES:
+            errors.append(
+                "thinking_history must be one of: " + ", ".join(MODES)
+            )
     # target_model is optional — empty means passthrough
     return errors
 
@@ -132,7 +139,13 @@ async def dashboard_page(request: Request):
 @web_router.get("/config", response_class=HTMLResponse)
 async def config_page(request: Request):
     """Instance create/edit form.  Query param ?id=<id> for edit."""
-    return templates.TemplateResponse(request, "config.html")
+    from cc_convert.thinking_policy import MODES, PROVIDER_NOTES
+
+    return templates.TemplateResponse(
+        request,
+        "config.html",
+        {"thinking_modes": MODES, "provider_notes": PROVIDER_NOTES},
+    )
 
 
 @web_router.get("/logs", response_class=HTMLResponse)
@@ -205,6 +218,7 @@ async def create_instance(request: Request):
         client_sonnet_model=data.get("client_sonnet_model", ""),
         client_opus_model=data.get("client_opus_model", ""),
         client_haiku_model=data.get("client_haiku_model", ""),
+        thinking_history=data.get("thinking_history", "upstream"),
         auto_start=bool(data.get("auto_start", True)),
     )
 

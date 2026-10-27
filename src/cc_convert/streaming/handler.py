@@ -10,6 +10,7 @@ import httpx
 from fastapi.responses import JSONResponse
 
 from cc_convert.protocol import AnthropicError, AnthropicErrorResponse
+from cc_convert.thinking_policy import note_upstream_rejection
 from cc_convert.utils.errors import upstream_diagnostic
 from cc_convert.utils.tokens import (
     _chunk_text,
@@ -61,6 +62,9 @@ async def _stream_response(
             if response.status_code != 200:
                 error_body = await response.aread()
                 error_text = error_body.decode("utf-8", errors="replace").strip()
+                # In "follow upstream" mode, remember a reasoning-shape 400 so
+                # later requests adapt (see thinking_policy.py).
+                note_upstream_rejection(model, response.status_code, error_text)
                 try:
                     error_json = json.loads(error_text) if error_text else {}
                     error_msg = error_json.get("error", {}).get("message") or error_text

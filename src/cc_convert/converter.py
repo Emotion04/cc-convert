@@ -23,6 +23,7 @@ from openai.types.chat import (
 from openai.types.chat.completion_create_params import CompletionCreateParams
 
 from cc_convert.protocol import UsageWithCache
+from cc_convert.thinking_policy import resolve_policy
 from cc_convert.utils.tokens import (
     anthropic_input_tokens,
     extract_cache_creation_tokens,
@@ -216,6 +217,7 @@ def _resolve_reasoning_effort(
 def convert_anthropic_to_openai(
     anthropic_params: MessageCreateParams,
     enabled_server_tools: list[type] | None = None,
+    thinking_history: str = "upstream",
 ) -> CompletionCreateParams:
     """
     Convert Anthropic MessageCreateParams to OpenAI CompletionCreateParams.
@@ -282,10 +284,28 @@ def convert_anthropic_to_openai(
     msg_count = 0
     has_thinking_in_history = False
     if messages:
-        for msg in messages:
-            converted_messages, msg_has_thinking = _convert_anthropic_message_to_openai(msg)
+        # Reasoning replay policy: providers disagree about how much prior
+        # thinking to send back (see thinking_policy.py).
+        effective_policy = resolve_policy(thinking_history, model)
+        last_assistant_index = -1
+        for index, candidate in enumerate(messages):
+            role = (
+                candidate.get("role")
+                if isinstance(candidate, dict)
+                else getattr(candidate, "role", None)
+            )
+            if role == "assistant":
+                last_assistant_index = index
+
+        for index, msg in enumerate(messages):
+            keep_thinking = effective_policy == "keep" or (
+                effective_policy == "turn" and index == last_assistant_index
+            )
+            converted_messages, msg_has_thinking = _convert_anthropic_message_to_openai(
+                msg, keep_thinking=keep_thinking
+            )
             openai_messages.extend(converted_messages)
-            if msg_has_thinking:
+            if msg_has_thinking and keep_thinking:
                 has_thinking_in_history = True
             msg_count += 1
     logger.debug(
@@ -432,6 +452,7 @@ def convert_anthropic_to_openai(
 
 def _convert_anthropic_message_to_openai(
     msg: MessageParam,
+    keep_thinking: bool = True,
 ) -> tuple[list[dict[str, Any]], bool]:
     """
     Convert a single Anthropic message to OpenAI format.
@@ -466,7 +487,11 @@ def _convert_anthropic_message_to_openai(
             openai_content.append({"type": "text", "text": text})
 
         elif block_type == "thinking":
-            # Extract thinking content for reasoning_content field
+            # Extract thinking content for reasoning_content field. The caller
+            # decides per message whether prior reasoning should be replayed
+            # (see thinking_policy.py).
+            if not keep_thinking:
+                continue
             if isinstance(block, dict):
                 thinking_text = block.get("thinking", "")
             else:

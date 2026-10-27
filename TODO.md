@@ -41,6 +41,12 @@
   - `_stream_response` 把第一个 chunk 整体当作 `message_start` 处理并 `continue`，
     若上游在同一 chunk 里带了首个 token，该 token 会被丢弃
   - 已改为：发出 `message_start` 后仅在无 `choices` 时跳过，否则继续处理
+- [x] **历史推理回传策略（五种模式 + 厂商规则）**
+  - 新增 `thinking_history` 实例配置：`upstream` / `rules` / `turn` / `keep` / `drop`
+  - `turn`（默认，仅最后一次 assistant）兼容需要工具轮回传的上游，同时避免重发全部历史推理
+  - `upstream` 在 `rules` 基础上，会从与推理相关的 400 中学习并调整后续请求
+  - 面板的「?」弹窗展示 7 家厂商的官方做法与来源
+  - 已知限制：上游**没有**标准化接口可查询该策略，"遵循上游" 实际是内置规则 + 错误学习
 - [ ] **content 中的字面 `<thinking>` 标签（暂不修）**
   - 上游若把推理写成 `<thinking>...</thinking>` 放在 `content` 里（而非
     `reasoning_content` 字段），cc-convert 会当作普通文本透传，标签可见
