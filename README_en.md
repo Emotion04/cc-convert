@@ -13,12 +13,21 @@ A bidirectional API protocol converter that runs **Claude Code / Anthropic SDK o
 
 ## Quick Start
 
+> Prerequisites, the two-port distinction, and troubleshooting are covered in **[docs/使用规范.md](docs/使用规范.md)** (Chinese).
+
 ```bash
-pip install cc-convert
-ccconvert start
+git clone https://github.com/Emotion04/cc-convert.git
+cd cc-convert
+uv sync
+uv run ccconvert start
 ```
 
-1. Open the Dashboard — the URL is printed on startup (e.g. `http://127.0.0.1:19500`)
+> No uv? `pip install cc-convert` works too, then run `ccconvert start` directly.
+
+1. Open the Dashboard — the URL is printed on startup, defaulting to the first free port from `http://127.0.0.1:18400`
+
+> ⚠️ **Two ports, easily confused**: `18400` (onwards) is the **Manager** dashboard — do **not** point Claude Code at it. `18401` (onwards) is the **instance port**, which is what Claude Code should use. The instance card's "Copy config" button emits the instance port.
+
 2. Click **Add Instance**, fill in the upstream **URL** and **API key** (+ optional target model), save and start
 3. On the instance card click **复制配置** (Copy config), then point Claude Code at it:
 
@@ -110,7 +119,7 @@ Each window now points at its own CC Convert instance — models and upstreams s
 
 ## Configuration
 
-Config file: `~/.ccconvert/config.toml` (auto-created; `CCCONVERT_CONFIG_DIR` overrides the directory). Instances are normally managed through the dashboard — no manual editing needed.
+Config file: `~/.ccconvert/config.toml` (auto-created; `CCCONVERT_CONFIG_DIR` overrides the directory). Runtime data (`manager.pid` / `manager.log` / `instances/`) lives alongside it and is overridable via `CCCONVERT_RUNTIME_DIR`. Instances are normally managed through the dashboard — no manual editing needed.
 
 ## API Endpoints
 
@@ -142,9 +151,13 @@ vLLM, SGLang, and any OpenAI-compatible API.
 ```bash
 git clone https://github.com/Emotion04/cc-convert.git
 cd cc-convert
-pip install -e ".[dev]"
-pytest
+uv sync          # installs runtime and test dependencies in one step
+uv run pytest
 ```
+
+> pip users can still use `pip install -e ".[dev]"`. The two dev-dependency declarations are kept in sync, verified by `tests/test_dev_deps.py`.
+
+The test suite is sandboxed: `tests/conftest.py` redirects the config and runtime directories to a temporary location and verifies at session end that your real `~/.ccconvert/config.toml` was left untouched.
 
 ## License
 

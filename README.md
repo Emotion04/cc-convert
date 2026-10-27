@@ -74,12 +74,21 @@ claude --setting settings-chat.json    # 窗口 2 → 实例 B
 
 ## 快速开始 (Python ≥ 3.12)
 
+> 完整的环境要求、端口说明与故障排查见 **[docs/使用规范.md](docs/使用规范.md)**。
+
 ```bash
-pip install cc-convert
-ccconvert start
+git clone https://github.com/Emotion04/cc-convert.git
+cd cc-convert
+uv sync
+uv run ccconvert start
 ```
 
-1. 打开 Dashboard——启动时会打印地址（如 `http://127.0.0.1:19500`）
+> 不用 uv 也可以：`pip install cc-convert` 后直接执行 `ccconvert start`。
+
+1. 打开 Dashboard——启动时会打印地址，默认从 `http://127.0.0.1:18400` 起取第一个空闲端口
+
+> ⚠️ **注意区分两个端口**：`18400`（起）是 **Manager 管理面板**，**不要**连它；`18401`（起）是**实例端口**，才是 Claude Code 要连的。在实例卡片点「复制配置」拿到的就是实例端口。
+
 2. 点击**添加实例**，填上游 **URL** 和 **API 密钥**（可选目标模型），保存并启动
 3. 在实例卡片点**复制配置**，然后把 Claude Code 指过去：
 
@@ -119,6 +128,8 @@ CC Convert 把每个Anthropic Messages 协议的请求转换成 OpenAI 格式发
 
 ## 命令行
 
+> 从源码运行时，以下命令前需加 `uv run`，例如 `uv run ccconvert status`。
+
 | 命令 | 说明 |
 |------|------|
 | `ccconvert start` | 后台启动 Manager 面板 |
@@ -129,7 +140,7 @@ CC Convert 把每个Anthropic Messages 协议的请求转换成 OpenAI 格式发
 
 ## 配置
 
-配置文件：`~/.ccconvert/config.toml`（首次运行自动创建；`CCCONVERT_CONFIG_DIR` 可覆盖目录）。实例通常通过面板管理，无需手改。
+配置文件：`~/.ccconvert/config.toml`（首次运行自动创建）。目录可由 `CCCONVERT_CONFIG_DIR` 覆盖；运行时数据目录（`manager.pid` / `manager.log` / `instances/`）可由 `CCCONVERT_RUNTIME_DIR` 覆盖。实例通常通过面板管理，无需手改。
 
 ## API 端点
 
@@ -160,9 +171,13 @@ vLLM、SGLang，以及任意 OpenAI 兼容 API。
 ```bash
 git clone https://github.com/Emotion04/cc-convert.git
 cd cc-convert
-pip install -e ".[dev]"
-pytest
+uv sync          # 一条命令装齐运行时依赖与测试依赖
+uv run pytest
 ```
+
+> pip 用户仍可使用 `pip install -e ".[dev]"`。dev 依赖在两处声明中保持一致，由 `tests/test_dev_deps.py` 自动校验。
+
+测试套件是**沙箱化**的：`tests/conftest.py` 会把配置目录与运行时目录指向临时目录，并在会话结束时校验你真实的 `~/.ccconvert/config.toml` 未被改动。
 
 ## 许可
 

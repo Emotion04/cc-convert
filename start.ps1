@@ -1,16 +1,19 @@
-# CC Convert 一键启动脚本
+﻿# CC Convert 一键启动脚本
 # 启动管理后台 + 打开浏览器
+
+# 切到脚本所在目录，uv run 才能找到 pyproject.toml
+Set-Location -LiteralPath $PSScriptRoot
 
 Write-Host "╔════════════════════════════════╗" -ForegroundColor Cyan
 Write-Host "║     CC Convert Multi-Instance       ║" -ForegroundColor Cyan
 Write-Host "╚════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
-# 启动后台服务
-Write-Host "[1/3] 启动管理后台..." -ForegroundColor Yellow
-ccconvert start
+# 启动后台服务（start 是幂等的：已在运行则不会重启，不影响现有会话）
+Write-Host "[1/3] 确保管理后台运行中..." -ForegroundColor Yellow
+uv run ccconvert start
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "启动失败，请检查 ccconvert logs" -ForegroundColor Red
+    Write-Host "启动失败，请检查 uv run ccconvert logs" -ForegroundColor Red
     pause
     exit 1
 }
@@ -20,11 +23,11 @@ Start-Sleep -Seconds 1
 
 # 打开 Dashboard
 Write-Host "[2/3] 打开 Dashboard..." -ForegroundColor Yellow
-ccconvert open
+uv run ccconvert open
 
 # 显示状态
 Write-Host "[3/3] 当前状态:" -ForegroundColor Yellow
-ccconvert status
+uv run ccconvert status
 
 Write-Host ""
 Write-Host "Dashboard 已打开，按任意键退出（不会停止后台服务）" -ForegroundColor Green

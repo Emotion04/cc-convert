@@ -86,18 +86,26 @@ ccconvert open       # 浏览器打开 Dashboard
 ## 配置
 
 - 配置文件：`~/.ccconvert/config.toml`（环境变量 `CCCONVERT_CONFIG_DIR` 可覆盖）
-- 首次运行自动创建，编辑添加 API Key
+- 运行时数据（`manager.pid` / `manager.json` / `manager.log` / `instances/` / `logs/`）：`%LOCALAPPDATA%\ccconvert`（Windows）或 `~/.local/share/ccconvert`，环境变量 `CCCONVERT_RUNTIME_DIR` 可覆盖。日志目录也走这里（`get_log_dir()`），勿再另算一份
+- 首次运行自动创建，编辑添加 API Key；完整的用户使用说明见 `docs/使用规范.md`
 
 ## 测试
 
 ```bash
 cd <cc-convert 仓库根目录>
-python -m pytest tests/ -q --tb=short
+uv run pytest -q
 ```
 
-核心测试文件：`test_router.py`, `test_profile_store.py`, `test_manager_routes.py`, `test_port_health.py`, `test_daemon.py`, `test_main.py`
+- 测试**沙箱化**：`tests/conftest.py` 在模块级把 `CCCONVERT_CONFIG_DIR` / `CCCONVERT_RUNTIME_DIR` 指向临时目录，并在会话结束时校验真实 `~/.ccconvert/config.toml` 未被改动。设置必须写在模块级而非 fixture 中——`daemon.py` 在导入时就把运行时路径固化成了模块级常量。
+- `pytest-timeout` 已启用（120s，thread 模式）；`tests/test_daemon_advanced.py` 中的 `signal.SIGKILL` 用例为 POSIX 专用，在 Windows 上跳过。
+- `tests/test_dev_deps.py` 校验 `[dependency-groups] dev` 与 `[project.optional-dependencies] dev` 两份声明一致。
+
+核心测试文件：`test_router.py`, `test_profile_store.py`, `test_manager_routes.py`, `test_port_health.py`, `test_daemon.py`, `test_main.py`, `test_smoke_imports.py`
 
 ## 关键约束
 
 - **Windows 兼容**：路径用 `runtime_paths` 而非硬编码，`SIGKILL` 不存在，用 `taskkill /F` 代替
 - **目标模型（target_model）**：空 = 透传；非空 = 覆盖上游收到的模型名
+- **协议转换热路径**：`converter.py`、`streaming/handler.py`、`responses_converter.py` 是这座桥的核心（Claude Code 直接依赖），改动风险最高，需格外谨慎并补充测试
+- **路径解析统一走 `runtime_paths`**：不要在别处另实现一份，历史上 `profile_store` 自己读了个名字带空格的环境变量（`"CC Convert_CONFIG_DIR"`），导致文档承诺的目录覆盖长期失效
+- **dev 依赖两份声明必须同步**（见 `tests/test_dev_deps.py`）：`uv sync` 只装 dependency-group，漂移会让测试环境残缺
