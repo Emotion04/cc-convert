@@ -10,6 +10,7 @@ import httpx
 from fastapi.responses import JSONResponse
 
 from cc_convert.protocol import AnthropicError, AnthropicErrorResponse
+from cc_convert.utils.errors import upstream_diagnostic
 from cc_convert.utils.tokens import (
     _chunk_text,
     _count_tokens,
@@ -70,6 +71,7 @@ async def _stream_response(
                         response.reason_phrase
                         or f"Upstream API error ({response.status_code})"
                     )
+                error_msg += upstream_diagnostic("POST", url, response.status_code)
 
                 error_event = AnthropicErrorResponse(
                     error=AnthropicError(type="api_error", message=error_msg)

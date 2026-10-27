@@ -37,6 +37,7 @@ from cc_convert.tools import (
     _add_tool_results_to_messages,
     _handle_with_server_tools,
 )
+from cc_convert.utils.errors import upstream_diagnostic
 from cc_convert.utils import (
     _chunk_text,
     _count_tokens,
@@ -390,11 +391,15 @@ async def create_message(
                     if not raw_text:
                         raw_text = response.reason_phrase or ""
                     error_message = (raw_text or "").strip()
+                    if not error_message:
+                        error_message = f"Upstream API error ({response.status_code})"
+                    error_message += upstream_diagnostic(
+                        "POST", url, response.status_code
+                    )
                     error_response = AnthropicErrorResponse(
                         error=AnthropicError(
                             type="api_error",
-                            message=error_message
-                            or f"Upstream API error ({response.status_code})",
+                            message=error_message,
                         )
                     )
                     return JSONResponse(
@@ -742,7 +747,9 @@ async def _openai_stream_proxy(
             if response.status_code != 200:
                 error_body = await response.aread()
                 error_text = error_body.decode("utf-8", errors="replace").strip()
-                yield f"data: {json.dumps({'error': {'message': error_text or f'Upstream error ({response.status_code})', 'type': 'api_error'}})}\n\n"
+                err_text = error_text or f"Upstream error ({response.status_code})"
+                err_text += upstream_diagnostic("POST", url, response.status_code)
+                yield f"data: {json.dumps({'error': {'message': err_text, 'type': 'api_error'}})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -911,6 +918,7 @@ async def openai_responses(
                 raw_text = (response.text or "").strip()
                 if not raw_text:
                     raw_text = response.reason_phrase or f"Upstream API error ({response.status_code})"
+                raw_text += upstream_diagnostic("POST", url, response.status_code)
                 return JSONResponse(
                     status_code=response.status_code,
                     content={"error": {"message": raw_text, "type": "api_error"}},
@@ -986,6 +994,10 @@ async def _stream_responses(
             if response.status_code != 200:
                 error_body = await response.aread()
                 error_text = error_body.decode("utf-8", errors="replace").strip()
+                error_text = error_text or f"Upstream error ({response.status_code})"
+                error_text += upstream_diagnostic(
+                    "POST", url, response.status_code
+                )
                 err_payload = {
                     "type": "response.failed",
                     "response": {
@@ -995,7 +1007,7 @@ async def _stream_responses(
                         "model": model,
                         "status": "failed",
                         "output": [],
-                        "error": {"code": "upstream_error", "message": error_text or f"Upstream error ({response.status_code})"},
+                        "error": {"code": "upstream_error", "message": error_text},
                     },
                 }
                 yield f"event: response.failed\ndata: {json.dumps(err_payload, ensure_ascii=False)}\n\n"

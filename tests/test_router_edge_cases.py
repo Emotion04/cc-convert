@@ -317,6 +317,40 @@ class TestGetRequestSettings:
         assert isinstance(result, Settings)
 
 
+class TestUpstreamDiagnostic:
+    """cc-convert's own diagnostics must be clearly labelled."""
+
+    def test_labelled_and_includes_request(self):
+        from cc_convert.utils.errors import upstream_diagnostic
+
+        text = upstream_diagnostic(
+            "POST", "https://api.example.com/chat/completions", 404
+        )
+
+        assert text.startswith("\n\n[cc-convert]")
+        assert "POST https://api.example.com/chat/completions -> 404" in text
+
+    def test_404_without_v1_suggests_the_prefix(self):
+        from cc_convert.utils.errors import upstream_diagnostic
+
+        text = upstream_diagnostic(
+            "POST", "https://api.aiaimax.com/chat/completions", 404
+        )
+
+        assert "/v1" in text
+        assert "base URL" in text
+
+    def test_no_hint_when_path_has_v1_or_status_is_not_404(self):
+        from cc_convert.utils.errors import upstream_diagnostic
+
+        assert "base URL" not in upstream_diagnostic(
+            "POST", "https://api.example.com/v1/chat/completions", 404
+        )
+        assert "base URL" not in upstream_diagnostic(
+            "POST", "https://api.example.com/chat/completions", 500
+        )
+
+
 class TestDescribeUpstreamError:
     """Upstream connection failures must never produce an empty message.
 
