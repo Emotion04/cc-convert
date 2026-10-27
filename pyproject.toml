@@ -32,9 +32,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# NOTE: keep this list identical to [dependency-groups] dev below.
+# CI asserts the two match, because they silently drifted apart once already
+# (this extra was missing pytest-cov/pytest-timeout, the group was missing
+# everything else), which made `uv sync` install an incomplete dev env.
+# This extra is retained so `pip install -e ".[dev]"` keeps working for
+# contributors who do not use uv.
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.3.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
@@ -69,9 +77,37 @@ strict = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
+# The suite uses explicit @pytest.mark.asyncio markers throughout, so "strict"
+# is correct. Do not switch to "auto" — that would silently activate async
+# fixtures that were never written.
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+# Backstop against tests that can hang forever (e.g. the daemon follow-mode
+# poll loop). "thread" is required on Windows, where "signal" is unavailable.
+timeout = 120
+timeout_method = "thread"
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: end-to-end tests that spawn real subprocesses",
+]
 
 [dependency-groups]
+# NOTE: keep this list identical to [project.optional-dependencies] dev above.
+# This group is the one `uv sync` installs, so it must stay complete.
+# jinja2 was removed here: it is already a runtime dependency.
 dev = [
-    "jinja2>=3.1.6",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.3.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+# Optional, only needed to build the standalone executable:
+#   uv sync --group build && uv run pyinstaller ccconvert.spec
+build = [
+    "pyinstaller>=6.0",
 ]
