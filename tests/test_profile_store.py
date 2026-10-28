@@ -340,9 +340,31 @@ class TestDetectUpstreamFormat:
         return result, client
 
     def test_valid_responses_payload_wins(self):
-        result, client = self._run([(200, {"object": "response", "output": []})])
+        result, client = self._run(
+            [
+                (
+                    200,
+                    {
+                        "object": "response",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "text", "text": "2"}],
+                            }
+                        ],
+                    },
+                )
+            ]
+        )
         assert result == "responses"
         assert client.posted[0].endswith("/responses")
+
+    def test_empty_output_is_not_treated_as_responses(self):
+        # 200 with the right envelope but nothing usable must not win.
+        result, _ = self._run(
+            [(200, {"object": "response", "output": []}), (200, {"choices": []})]
+        )
+        assert result == "chat_completions"
 
     def test_invalid_responses_payload_falls_back_to_chat(self):
         result, _ = self._run([(200, {"foo": "bar"}), (200, {"choices": []})])

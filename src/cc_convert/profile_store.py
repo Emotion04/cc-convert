@@ -379,21 +379,67 @@ def build_worker_settings(store: ProfileStore, instance: InstanceProfile) -> dic
     }
 
 
+#: A trivially cheap prompt whose answer proves the endpoint really works.
+_PROBE_PROMPT = "1+1=?"
+_PROBE_MAX_OUTPUT = 32
+
+
+def _responses_has_content(data: object) -> bool:
+    """True only when a Responses payload actually carries a message item.
+
+    Relays frequently answer 200 with the right envelope but an empty
+    ``output`` — accepting that would route real traffic to a dead endpoint.
+    """
+    if not isinstance(data, dict):
+        return False
+    if data.get("object") not in (None, "response"):
+        return False
+    output = data.get("output")
+    if not isinstance(output, list) or not output:
+        return False
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "message" or item.get("content"):
+            return True
+    return False
+
+
+def _chat_has_content(data: object) -> bool:
+    """True only when a chat/completions payload carries a usable choice."""
+    if not isinstance(data, dict):
+        return False
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return False
+    first = choices[0]
+    if not isinstance(first, dict):
+        return False
+    message = first.get("message") or {}
+    return bool(
+        message.get("content")
+        or message.get("reasoning_content")
+        or message.get("tool_calls")
+        or first.get("finish_reason")
+    )
+
+
 async def detect_upstream_format(
     base_url: str,
     api_key: str = "",
-    timeout: float = 8.0,
+    timeout: float = 20.0,
     model: str = "ping",
 ) -> str:
     """Probe the upstream and return the most capable format it really serves.
 
-    ``responses`` is preferred **only when the upstream returns a valid
-    Responses payload** (``object == "response"`` or an ``output`` array).
-    Merely answering 200/4xx is not enough: many relays expose a half-working
-    endpoint. Anything inconclusive falls back to ``chat_completions``.
+    A bare HTTP 200 is not proof: relays commonly expose an endpoint that
+    accepts the request but returns nothing usable. Each probe therefore sends
+    a trivial ``1+1=?`` with a tiny output budget and requires a *real* message
+    in the response. ``responses`` wins when both work; anything inconclusive
+    falls back to ``chat_completions``.
 
-    ``model`` should be a real model name when one is known; the token spend is
-    kept to one output token and minimal reasoning effort.
+    ``model`` should be a real model name when one is known, otherwise most
+    relays reject the probe.
     """
     import httpx
 
@@ -402,35 +448,34 @@ async def detect_upstream_format(
         headers["Authorization"] = f"Bearer {api_key}"
     base = base_url.rstrip("/")
 
-    def _is_html(response) -> bool:
-        return "text/html" in (response.headers.get("content-type") or "")
-
     async def _post(client, path: str, body: dict):
         return await client.post(f"{base}{path}", headers=headers, json=body)
 
+    def _payload(response) -> object | None:
+        try:
+            return response.json()
+        except ValueError:
+            return None
+
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        # 1. Responses — accept only a genuinely valid payload.
+        # 1. Responses — must actually answer the question.
         try:
             response = await _post(
                 client,
                 "/responses",
                 {
                     "model": model,
-                    "input": "p",
-                    "max_output_tokens": 1,
-                    # Keep the probe cheap for reasoning models.
+                    "input": _PROBE_PROMPT,
+                    "max_output_tokens": _PROBE_MAX_OUTPUT,
+                    # Keep the probe cheap for reasoning models: without this a
+                    # "1+1" can still burn hundreds of reasoning tokens.
                     "reasoning": {"effort": "minimal"},
                 },
             )
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                except ValueError:
-                    data = None
-                if isinstance(data, dict) and (
-                    data.get("object") == "response" or "output" in data
-                ):
-                    return "responses"
+            if response.status_code == 200 and _responses_has_content(
+                _payload(response)
+            ):
+                return "responses"
         except (
             httpx.ConnectError,
             httpx.TimeoutException,
@@ -446,12 +491,12 @@ async def detect_upstream_format(
                 "/chat/completions",
                 {
                     "model": model,
-                    "max_tokens": 1,
-                    "messages": [{"role": "user", "content": "p"}],
+                    "max_tokens": _PROBE_MAX_OUTPUT,
+                    "messages": [{"role": "user", "content": _PROBE_PROMPT}],
                 },
             )
-            if response.status_code == 404 and _is_html(response):
-                return "chat_completions"  # neither path exists; report the default
+            # Report the default either way: when nothing answers, staying on
+            # chat/completions keeps behaviour unchanged.
             return "chat_completions"
         except (
             httpx.ConnectError,
