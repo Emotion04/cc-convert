@@ -107,8 +107,8 @@
                     <div class="flex gap-2">
                         <select x-model="formData.thinking_history"
                                 class="input-field flex-1 px-4 py-2.5 rounded-xl text-sm text-stone-800">
-                            <option value="upstream">遵循上游（推荐：内置规则 + 依据 400 自动调整）</option>
-                            <option value="rules">按内置规则（根据模型厂商）</option>
+                            <option value="upstream">遵循内置厂商规则（推荐）</option>
+                            <option value="rules">严格按内置规则（不接受自动纠正）</option>
                             <option value="turn">仅当前轮（含整条工具调用链）</option>
                             <option value="keep">全部回传</option>
                             <option value="drop">全部丢弃</option>
@@ -119,6 +119,9 @@
                             <span x-text="thinkingProbe.status === 'probing' ? '探测中…' : '探测'"></span>
                         </button>
                     </div>
+                    <input x-show="!formData.target_model" x-model="probeModel" type="text"
+                           class="input-field w-full mt-2 px-3 py-2 rounded-xl text-xs text-stone-700 placeholder-stone-300"
+                           placeholder="探测用模型名（目标模型为空时必填，如 deepseek-v4.1-flash）">
                     <p x-show="thinkingProbe.status === 'done'" class="text-xs mt-1.5 text-teal-600"
                        x-text="'建议：' + thinkingProbe.policy + ' — ' + thinkingProbe.evidence"></p>
                     <p x-show="thinkingProbe.status === 'fail'" class="text-xs mt-1.5 text-amber-600"
@@ -310,6 +313,7 @@ function instanceConfig() {
             detected_format: '',
         },
         thinkingProbe: { status: 'idle', policy: '', evidence: '' },
+        probeModel: '',
         thinkingCorrected: false,
         thinkingCorrectedTo: '',
         originalData: null,
@@ -413,6 +417,16 @@ function instanceConfig() {
             }
         },
 
+        _csrfExpired(r, data) {
+            // The manager issues a fresh CSRF token on every start, so a page
+            // left open across a restart fails with 403 until it is refreshed.
+            if (r.status === 403 && ((data && data.detail) || '').includes('CSRF')) {
+                showToast('页面已过期（管理器重启过），请按 Ctrl+F5 刷新后重试', 'error');
+                return true;
+            }
+            return false;
+        },
+
         async probeThinking() {
             if (this.thinkingProbe.status === 'probing') return;
             this.thinkingProbe = { status: 'probing', policy: '', evidence: '' };
@@ -426,12 +440,20 @@ function instanceConfig() {
                     body: JSON.stringify({
                         url: (this.formData.upstream_base_url || '').trim(),
                         key: (this.formData.upstream_api_key || '').trim(),
-                        model: (this.formData.target_model || '').trim(),
+                        model: (this.formData.target_model || this.probeModel || '').trim(),
                         instance_id: this.instanceId,
                     }),
                 });
                 const data = await r.json().catch(() => ({}));
                 if (!r.ok) {
+                    if (this._csrfExpired(r, data)) {
+                        this.thinkingProbe = {
+                            status: 'fail',
+                            policy: '',
+                            evidence: '页面已过期，请按 Ctrl+F5 刷新后重试',
+                        };
+                        return;
+                    }
                     this.thinkingProbe = {
                         status: 'fail',
                         policy: '',
@@ -521,7 +543,8 @@ function instanceConfig() {
                         setTimeout(() => { window.location.href = '/'; }, 500);
                     }
                 } else {
-                    const data = await r.json();
+                    const data = await r.json().catch(() => ({}));
+                    if (this._csrfExpired(r, data)) return;
                     showToast(data.detail || '保存失败', 'error');
                 }
             } catch (e) {

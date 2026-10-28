@@ -198,6 +198,10 @@ def resolve_policy(mode: str | None, model: str | None = None) -> EffectivePolic
             return mode  # type: ignore[return-value]
         return rule_for_model(model or ctx.model)
 
+    # "rules" is explicitly static: never let a learned correction change it.
+    if mode == "rules":
+        return rule_for_model(model or ctx.model)
+
     if ctx.auto_correct:
         correction = load_correction(ctx)
         if correction:

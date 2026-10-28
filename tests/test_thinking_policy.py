@@ -97,6 +97,13 @@ class TestResolvePolicy:
         assert tp.resolve_policy("rules", "deepseek-r1") == "drop"
         assert tp.resolve_policy("rules", "deepseek-v4.1") == "turn"
 
+    def test_rules_mode_ignores_a_learned_correction(self):
+        tp.note_upstream_rejection(
+            400, "reasoning_content must be passed back", "m"
+        )
+        # Learned says keep; "rules" is explicitly static.
+        assert tp.resolve_policy("rules", "m") == "turn"
+
 
 class TestLearning:
     def test_missing_reasoning_learns_keep(self):
