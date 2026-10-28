@@ -129,6 +129,41 @@ def run_worker() -> None:
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     _write_pid(pid_path)
 
+    # Step 6.5: Resolve "auto" once, at startup.
+    # Previously "auto" was stored but never probed at runtime, so it silently
+    # behaved like chat/completions. Probe now, with the real model when known,
+    # and keep the conservative default when the probe is inconclusive.
+    if settings.upstream_format == "auto":
+        import asyncio
+
+        from cc_convert.profile_store import detect_upstream_format
+
+        try:
+            detected = asyncio.run(
+                detect_upstream_format(
+                    settings.openai_base_url,
+                    settings.openai_api_key,
+                    timeout=8.0,
+                    model=settings.default_model or "ping",
+                )
+            )
+        except Exception as exc:  # never block startup on a probe
+            logger.warning("Upstream format probe failed (%s), using chat", exc)
+            detected = "chat_completions"
+        settings.upstream_format = detected
+        logger.info("Auto-detected upstream format: %s", detected)
+        # Re-key the learned-correction fingerprint on the resolved format, so
+        # switching between "auto" and a concrete value does not look like an
+        # upstream change.
+        thinking_policy.configure(
+            instance_id=instance_id,
+            base_url=settings.openai_base_url,
+            model=settings.default_model,
+            upstream_format=settings.upstream_format,
+            auto_correct=settings.thinking_history_auto_correct,
+            force_manual=settings.thinking_history_force_manual,
+        )
+
     # Step 7: Create proxy app
     app = create_proxy_app(settings, instance_id, internal_token, revision=revision)
 

@@ -429,8 +429,9 @@ def convert_anthropic_to_openai(
     # Handle thinking parameter
     # vLLM/SGLang use chat_template_kwargs.thinking to toggle thinking mode
     # Some models use "thinking", others use "enable_thinking", so we include both
-    # DeepSeek V4 additionally uses Anthropic effort tiers as reasoning_effort
-    # TODO: Support for multi-turn thinking conversation history
+    # DeepSeek V4 additionally uses Anthropic effort tiers as reasoning_effort.
+    # Historical reasoning is replayed separately, per thinking_history policy
+    # (see thinking_policy.py).
     if thinking and isinstance(thinking, dict):
         thinking_type = thinking.get("type")
         if thinking_type == "enabled":
