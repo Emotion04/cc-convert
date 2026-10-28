@@ -3,6 +3,7 @@
 Multi-instance dashboard routes for the CC Convert manager.
 """
 
+import asyncio
 import os
 import sys
 import time
@@ -498,10 +499,24 @@ async def detect_format(request: Request):
         raise HTTPException(400, detail="Invalid JSON body")
     base_url = (data.get("url") or "").strip()
     api_key = (data.get("key") or "").strip()
+    model = (data.get("model") or "").strip() or "ping"
+    instance_id = data.get("instance_id")
+
+    if instance_id and (not api_key or api_key.startswith("***")):
+        store = _get_store(request)
+        for inst in store.instances:
+            if inst.id == instance_id:
+                api_key = inst.upstream_api_key
+                base_url = base_url or inst.upstream_base_url
+                if model == "ping":
+                    model = inst.target_model or "ping"
+                break
+
     if not base_url:
         raise HTTPException(400, detail="url is required")
     from cc_convert.profile_store import detect_upstream_format as _detect
-    fmt = await _detect(base_url, api_key)
+
+    fmt = await _detect(base_url, api_key, model=model)
     return {"format": fmt}
 
 
@@ -539,6 +554,51 @@ async def probe_thinking(request: Request):
     from cc_convert.thinking_policy import probe_upstream
 
     return await probe_upstream(url, key, model)
+
+
+@web_router.post("/api/reprobe-formats")
+async def reprobe_formats(request: Request):
+    """Probe every instance and report the format it really supports.
+
+    Read-only: nothing is changed here. ``responses`` is recommended only when
+    the upstream returns a valid Responses payload.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    instance_id = data.get("instance_id") if isinstance(data, dict) else None
+
+    store = _get_store(request)
+    from cc_convert.profile_store import detect_upstream_format as _detect
+
+    targets = [
+        inst
+        for inst in store.instances
+        if not instance_id or inst.id == instance_id
+    ]
+
+    async def _one(inst) -> dict:
+        model = inst.target_model or "ping"
+        try:
+            recommended = await _detect(
+                inst.upstream_base_url, inst.upstream_api_key, model=model
+            )
+            error = None
+        except Exception as exc:
+            recommended = None
+            error = f"{type(exc).__name__}: {exc}"
+        return {
+            "id": inst.id,
+            "name": inst.name,
+            "current": inst.upstream_format,
+            "recommended": recommended,
+            "model": model,
+            "error": error,
+        }
+
+    results = await asyncio.gather(*[_one(inst) for inst in targets])
+    return {"results": list(results)}
 
 
 @web_router.get("/api/ports/overview")

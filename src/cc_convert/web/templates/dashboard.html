@@ -40,12 +40,18 @@
     <!-- Instance Grid -->
     <div class="flex items-center justify-between mb-5">
         <h3 class="text-sm font-bold text-stone-900">代理实例</h3>
-        <a href="/config" class="btn-primary px-4 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer inline-flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            添加实例
-        </a>
+        <div class="flex items-center gap-2">
+            <button @click="runReprobe()" :disabled="reprobe.running"
+                    class="btn-secondary px-3 py-2 rounded-xl text-xs font-semibold text-stone-600 cursor-pointer disabled:opacity-50 disabled:cursor-wait">
+                <span x-text="reprobe.running ? '探测中…' : '重新探测协议'"></span>
+            </button>
+            <a href="/config" class="btn-primary px-4 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer inline-flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                添加实例
+            </a>
+        </div>
     </div>
 
     <div x-show="instances.length === 0" class="glass-card rounded-2xl p-12 text-center">
@@ -222,6 +228,49 @@
             </div>
         </div>
     </div>
+
+    <!-- Protocol re-probe report -->
+    <div x-show="reprobe.show" x-cloak
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+         @click.self="reprobe.show = false">
+        <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6 shadow-2xl">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-bold text-stone-900">协议探测结果</h3>
+                <button @click="reprobe.show = false"
+                        class="text-stone-400 hover:text-stone-600 text-2xl leading-none cursor-pointer">&times;</button>
+            </div>
+            <p class="text-xs text-stone-500 mb-4">
+                只有在返回真实 Responses 结构时才会建议切换。应用后会重启对应实例。
+            </p>
+            <div class="space-y-2">
+                <template x-for="item in reprobe.results" :key="item.id">
+                    <label class="flex items-start gap-3 rounded-xl border border-stone-100 px-3 py-2 cursor-pointer">
+                        <input type="checkbox" x-model="item.apply"
+                               :disabled="!item.recommended || item.recommended === item.current"
+                               class="mt-0.5 rounded">
+                        <span class="min-w-0 flex-1">
+                            <span class="text-sm font-semibold text-stone-800" x-text="item.name"></span>
+                            <span class="block text-[11px] text-stone-500 font-mono">
+                                当前 <span x-text="item.current"></span>
+                                → 建议 <span x-text="item.recommended || '探测失败'"></span>
+                            </span>
+                            <span x-show="item.error" class="block text-[11px] text-amber-600" x-text="item.error"></span>
+                        </span>
+                    </label>
+                </template>
+            </div>
+            <div class="flex justify-end gap-3 mt-5">
+                <button @click="reprobe.show = false"
+                        class="btn-secondary px-4 py-2 rounded-xl text-sm font-semibold text-stone-600 cursor-pointer">
+                    取消
+                </button>
+                <button @click="applyReprobe()"
+                        class="btn-primary px-4 py-2 rounded-xl text-sm font-semibold text-white cursor-pointer">
+                    应用所选
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -234,6 +283,8 @@ function dashboard() {
         // Per-instance in-flight action: 'start' | 'stop' | 'restart'.
         // Drives the spinner and disables the buttons while a request runs.
         busy: {},
+        // Batch protocol re-probe (report first, apply on confirmation).
+        reprobe: { running: false, show: false, results: [] },
 
         async init() {
             await Promise.all([
@@ -271,6 +322,75 @@ function dashboard() {
             // Starting waits for the worker's health check; give it a ceiling so
             // the spinner cannot run forever on a hung upstream.
             await this._runInstanceAction(inst, action, 90000);
+        },
+
+        async runReprobe() {
+            if (this.reprobe.running) return;
+            this.reprobe.running = true;
+            try {
+                const r = await fetch('/api/reprobe-formats', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CCCONVERT-CSRF': getCsrfToken(),
+                    },
+                    body: JSON.stringify({}),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    showToast(
+                        r.status === 403 ? '页面已过期，请按 Ctrl+F5 刷新' : (data.detail || '探测失败'),
+                        'error'
+                    );
+                    return;
+                }
+                this.reprobe.results = (data.results || []).map(item => ({
+                    ...item,
+                    apply: !!item.recommended && item.recommended !== item.current,
+                }));
+                if (!this.reprobe.results.length) {
+                    showToast('没有可探测的实例', 'info');
+                    return;
+                }
+                this.reprobe.show = true;
+            } catch (e) {
+                showToast('探测失败: ' + e.message, 'error');
+            } finally {
+                this.reprobe.running = false;
+            }
+        },
+
+        async applyReprobe() {
+            const targets = this.reprobe.results.filter(
+                item => item.apply && item.recommended && item.recommended !== item.current
+            );
+            if (!targets.length) {
+                this.reprobe.show = false;
+                return;
+            }
+            let ok = 0;
+            let failed = 0;
+            for (const item of targets) {
+                try {
+                    const r = await fetch(`/api/instances/${item.id}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CCCONVERT-CSRF': getCsrfToken(),
+                        },
+                        body: JSON.stringify({ upstream_format: item.recommended }),
+                    });
+                    if (r.ok) ok++; else failed++;
+                } catch (e) {
+                    failed++;
+                }
+            }
+            this.reprobe.show = false;
+            showToast(
+                `已更新 ${ok} 个实例${failed ? `，${failed} 个失败` : ''}`,
+                failed ? 'warning' : 'success'
+            );
+            await this.fetchInstances();
         },
 
         async restartInstance(inst) {

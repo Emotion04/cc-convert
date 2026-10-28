@@ -399,7 +399,9 @@ function instanceConfig() {
                     headers: {'Content-Type': 'application/json', 'X-CCCONVERT-CSRF': getCsrfToken()},
                     body: JSON.stringify({
                         url: (this.formData.upstream_base_url || '').trim(),
-                        key: (this.formData.upstream_api_key || '').trim()
+                        key: (this.formData.upstream_api_key || '').trim(),
+                        model: (this.formData.target_model || this.probeModel || '').trim(),
+                        instance_id: this.instanceId
                     })
                 });
                 if (r.ok) {

@@ -289,3 +289,69 @@ class TestCheckUpstreamBaseUrl:
 
         assert len(warnings) == 1
         assert "502" in warnings[0]
+
+
+class TestDetectUpstreamFormat:
+    """Responses is preferred only when a real Responses payload comes back."""
+
+    @staticmethod
+    def _client(steps):
+        class Fake:
+            def __init__(self):
+                self.posted = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url, headers=None, json=None):
+                from types import SimpleNamespace
+
+                self.posted.append(url)
+                status, payload = steps.pop(0)
+
+                def _json():
+                    if isinstance(payload, Exception):
+                        raise payload
+                    return payload
+
+                return SimpleNamespace(
+                    status_code=status,
+                    headers={"content-type": "application/json"},
+                    json=_json,
+                    text="",
+                )
+
+        return Fake()
+
+    def _run(self, steps):
+        import asyncio
+        from unittest.mock import patch
+
+        from cc_convert.profile_store import detect_upstream_format
+
+        client = self._client(steps)
+        with patch("httpx.AsyncClient", return_value=client):
+            result = asyncio.run(
+                detect_upstream_format("https://api.example.com/v1", "k", model="m")
+            )
+        return result, client
+
+    def test_valid_responses_payload_wins(self):
+        result, client = self._run([(200, {"object": "response", "output": []})])
+        assert result == "responses"
+        assert client.posted[0].endswith("/responses")
+
+    def test_invalid_responses_payload_falls_back_to_chat(self):
+        result, _ = self._run([(200, {"foo": "bar"}), (200, {"choices": []})])
+        assert result == "chat_completions"
+
+    def test_responses_404_uses_chat(self):
+        result, _ = self._run([(404, ValueError("not found")), (200, {"choices": []})])
+        assert result == "chat_completions"
+
+    def test_no_endpoint_reports_chat_default(self):
+        result, _ = self._run([(404, ValueError("no")), (404, ValueError("no"))])
+        assert result == "chat_completions"

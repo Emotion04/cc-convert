@@ -379,10 +379,21 @@ def build_worker_settings(store: ProfileStore, instance: InstanceProfile) -> dic
     }
 
 
-async def detect_upstream_format(base_url: str, api_key: str = "", timeout: float = 8.0) -> str:
-    """Probe the upstream to determine which API format it supports.
+async def detect_upstream_format(
+    base_url: str,
+    api_key: str = "",
+    timeout: float = 8.0,
+    model: str = "ping",
+) -> str:
+    """Probe the upstream and return the most capable format it really serves.
 
-    Returns one of ``"chat_completions"`` or ``"responses"``.
+    ``responses`` is preferred **only when the upstream returns a valid
+    Responses payload** (``object == "response"`` or an ``output`` array).
+    Merely answering 200/4xx is not enough: many relays expose a half-working
+    endpoint. Anything inconclusive falls back to ``chat_completions``.
+
+    ``model`` should be a real model name when one is known; the token spend is
+    kept to one output token and minimal reasoning effort.
     """
     import httpx
 
@@ -390,38 +401,65 @@ async def detect_upstream_format(base_url: str, api_key: str = "", timeout: floa
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     base = base_url.rstrip("/")
-    probe_body = {"model": "ping", "max_tokens": 1, "messages": [{"role": "user", "content": "p"}]}
 
-    # 1. Try chat/completions (most common)
-    try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as c:
-            r = await c.post(f"{base}/chat/completions", headers=headers, json=probe_body)
-            if r.status_code in (200, 400, 401, 403, 404, 422):
-                # 200→works, 400/401/403/404/422→endpoint exists, just our probe is bad
-                return "chat_completions"
-            # Non-JSON response likely means the path doesn't exist (e.g. HTML 404 page)
-            if r.status_code == 404 and "text/html" in (r.headers.get("content-type") or ""):
-                pass  # fall through to next probe
-            else:
-                return "chat_completions"  # endpoint exists
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ConnectTimeout):
-        pass
+    def _is_html(response) -> bool:
+        return "text/html" in (response.headers.get("content-type") or "")
 
-    # 2. Try responses
-    try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as c:
-            r2 = await c.post(
-                f"{base}/responses",
-                headers=headers,
-                json={"model": "ping", "input": "p"},
+    async def _post(client, path: str, body: dict):
+        return await client.post(f"{base}{path}", headers=headers, json=body)
+
+    async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+        # 1. Responses — accept only a genuinely valid payload.
+        try:
+            response = await _post(
+                client,
+                "/responses",
+                {
+                    "model": model,
+                    "input": "p",
+                    "max_output_tokens": 1,
+                    # Keep the probe cheap for reasoning models.
+                    "reasoning": {"effort": "minimal"},
+                },
             )
-            if r2.status_code in (200, 400, 401, 403, 404, 422):
-                return "responses"
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ConnectTimeout):
-        pass
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = None
+                if isinstance(data, dict) and (
+                    data.get("object") == "response" or "output" in data
+                ):
+                    return "responses"
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.RemoteProtocolError,
+            httpx.ConnectTimeout,
+        ):
+            pass
 
-    # 3. Default to chat_completions (most universal)
-    return "chat_completions"
+        # 2. Chat completions — the universal fallback.
+        try:
+            response = await _post(
+                client,
+                "/chat/completions",
+                {
+                    "model": model,
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "p"}],
+                },
+            )
+            if response.status_code == 404 and _is_html(response):
+                return "chat_completions"  # neither path exists; report the default
+            return "chat_completions"
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.RemoteProtocolError,
+            httpx.ConnectTimeout,
+        ):
+            return "chat_completions"
 
 
 async def check_upstream_base_url(
