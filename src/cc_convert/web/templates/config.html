@@ -107,8 +107,9 @@
                     <div class="flex gap-2">
                         <select x-model="formData.thinking_history"
                                 class="input-field flex-1 px-4 py-2.5 rounded-xl text-sm text-stone-800">
-                            <option value="upstream">遵循内置厂商规则（推荐）</option>
-                            <option value="rules">严格按内置规则（不接受自动纠正）</option>
+                            <option value="auto">智能（推荐）：内置规则 + 从上游 400 学习</option>
+                            <option value="upstream">遵循上游：启动时实时探测（多 1~2 次极小请求）</option>
+                            <option value="rules">严格按内置规则（不学习、不纠正）</option>
                             <option value="turn">仅当前轮（含整条工具调用链）</option>
                             <option value="keep">全部回传</option>
                             <option value="drop">全部丢弃</option>
@@ -268,8 +269,9 @@
                         class="text-stone-400 hover:text-stone-600 text-2xl leading-none cursor-pointer">&times;</button>
             </div>
             <p class="text-xs leading-relaxed text-stone-500 mb-4">
-                上游没有标准化接口可以查询这项策略，因此「遵循上游」以官方文档整理的内置规则为准，
-                并在收到与推理相关的 400 时自动调整后续请求。
+                <strong>智能</strong>：使用下方整理的内置规则，并在收到推理相关的 400 时自动纠正后续请求。<br>
+                <strong>遵循上游</strong>：Worker 启动时真实探测上游（1~2 次极小请求），探测失败则回退到内置规则。<br>
+                <strong>严格按内置规则</strong>：不探测、不学习、不纠正。<br>
                 <code class="font-mono">turn</code> 表示只回传「当前轮」的推理：最后一次用户输入之后的全部 assistant 消息（含多步工具调用），更早轮次丢弃。
             </p>
             <div class="space-y-3">
@@ -307,7 +309,7 @@ function instanceConfig() {
             client_haiku_model: '',
             auto_start: true,
             upstream_format: 'auto',
-            thinking_history: 'upstream',
+            thinking_history: 'auto',
             thinking_history_auto_correct: true,
             thinking_history_force_manual: false,
             detected_format: '',
@@ -362,7 +364,7 @@ function instanceConfig() {
                     client_haiku_model: data.client_haiku_model || '',
                     auto_start: data.auto_start !== false,
                     upstream_format: data.upstream_format || 'auto',
-                    thinking_history: data.thinking_history || 'upstream',
+                    thinking_history: data.thinking_history || 'auto',
                     thinking_history_auto_correct: data.thinking_history_auto_correct !== false,
                     thinking_history_force_manual: data.thinking_history_force_manual === true,
                     detected_format: '',

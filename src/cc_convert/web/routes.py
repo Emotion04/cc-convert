@@ -257,7 +257,7 @@ async def create_instance(request: Request):
         client_sonnet_model=data.get("client_sonnet_model", ""),
         client_opus_model=data.get("client_opus_model", ""),
         client_haiku_model=data.get("client_haiku_model", ""),
-        thinking_history=data.get("thinking_history", "upstream"),
+        thinking_history=data.get("thinking_history", "auto"),
         thinking_history_auto_correct=bool(
             data.get("thinking_history_auto_correct", True)
         ),

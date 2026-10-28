@@ -164,6 +164,34 @@ def run_worker() -> None:
             force_manual=settings.thinking_history_force_manual,
         )
 
+    # "upstream" mode means a real probe, not just the built-in rules.
+    if settings.thinking_history == "upstream":
+        import asyncio
+
+        from cc_convert.thinking_policy import probe_upstream, set_probe_result
+
+        try:
+            probe = asyncio.run(
+                probe_upstream(
+                    settings.openai_base_url,
+                    settings.openai_api_key,
+                    model=settings.default_model or "ping",
+                    timeout=8.0,
+                )
+            )
+            policy = probe.get("policy")
+            set_probe_result(
+                policy if policy in ("turn", "keep", "drop") else None
+            )
+            logger.info(
+                "Thinking-history probe: %s (%s)",
+                policy,
+                probe.get("evidence", ""),
+            )
+        except Exception as exc:  # never block startup on a probe
+            logger.warning("Thinking-history probe failed: %s", exc)
+            set_probe_result(None)
+
     # Step 7: Create proxy app
     app = create_proxy_app(settings, instance_id, internal_token, revision=revision)
 

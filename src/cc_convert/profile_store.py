@@ -99,8 +99,10 @@ class InstanceProfile(BaseModel):
         default="auto",
         description="Upstream API format: chat_completions, responses, or auto-detect"
     )
-    thinking_history: Literal["upstream", "rules", "turn", "keep", "drop"] = Field(
-        default="upstream",
+    thinking_history: Literal[
+        "upstream", "auto", "rules", "turn", "keep", "drop"
+    ] = Field(
+        default="auto",
         description="How much previous-turn reasoning to send upstream",
     )
     thinking_history_auto_correct: bool = Field(

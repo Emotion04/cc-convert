@@ -312,9 +312,9 @@ class Settings(BaseSettings):
         description="Upstream API format: chat_completions or responses"
     )
     thinking_history: str = Field(
-        default="upstream",
+        default="auto",
         description="How much previous-turn reasoning to send upstream: "
-        "upstream, rules, turn, keep, drop",
+        "upstream, auto, rules, turn, keep, drop",
     )
     thinking_history_auto_correct: bool = Field(
         default=True,

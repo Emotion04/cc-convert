@@ -33,11 +33,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-ThinkingHistoryMode = Literal["upstream", "rules", "turn", "keep", "drop"]
+ThinkingHistoryMode = Literal["upstream", "auto", "rules", "turn", "keep", "drop"]
 EffectivePolicy = Literal["turn", "keep", "drop"]
 
-MODES: tuple[str, ...] = ("upstream", "rules", "turn", "keep", "drop")
-DEFAULT_MODE: ThinkingHistoryMode = "upstream"
+MODES: tuple[str, ...] = ("upstream", "auto", "rules", "turn", "keep", "drop")
+# "auto" is the default: it needs no probe request and still corrects itself
+# from upstream 400s. "upstream" explicitly asks for a real probe at startup.
+DEFAULT_MODE: ThinkingHistoryMode = "auto"
 
 MANUAL_MODES = ("turn", "keep", "drop")
 
@@ -87,9 +89,16 @@ class PolicyContext:
     upstream_format: str = ""
     auto_correct: bool = True
     force_manual: bool = False
+    #: Result of the startup probe, only used by the "upstream" mode.
+    probe_result: EffectivePolicy | None = None
 
 
 _CTX = PolicyContext()
+
+
+def set_probe_result(policy: EffectivePolicy | None) -> None:
+    """Record the result of the startup probe (``upstream`` mode only)."""
+    _CTX.probe_result = policy
 
 logger = logging.getLogger(__name__)
 
@@ -202,12 +211,30 @@ def resolve_policy(mode: str | None, model: str | None = None) -> EffectivePolic
     if mode == "rules":
         return rule_for_model(model or ctx.model)
 
-    if ctx.auto_correct:
-        correction = load_correction(ctx)
-        if correction:
-            return correction["policy"]  # type: ignore[return-value]
+    # "upstream" = the real probe performed at worker startup. Inconclusive
+    # probes fall back to the learned correction, then to the built-in rules.
+    if mode == "upstream":
+        if ctx.probe_result:
+            return ctx.probe_result
+        if ctx.auto_correct:
+            correction = load_correction(ctx)
+            if correction:
+                return correction["policy"]  # type: ignore[return-value]
+        return rule_for_model(model or ctx.model)
+
+    # "auto" = researched rules plus corrections learned from upstream 400s.
+    if mode == "auto":
+        if ctx.auto_correct:
+            correction = load_correction(ctx)
+            if correction:
+                return correction["policy"]  # type: ignore[return-value]
+        return rule_for_model(model or ctx.model)
 
     if mode in MANUAL_MODES:
+        if ctx.auto_correct:
+            correction = load_correction(ctx)
+            if correction:
+                return correction["policy"]  # type: ignore[return-value]
         return mode  # type: ignore[return-value]
     return rule_for_model(model or ctx.model)
 

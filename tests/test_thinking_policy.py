@@ -97,6 +97,19 @@ class TestResolvePolicy:
         assert tp.resolve_policy("rules", "deepseek-r1") == "drop"
         assert tp.resolve_policy("rules", "deepseek-v4.1") == "turn"
 
+    def test_upstream_mode_uses_the_startup_probe_result(self):
+        tp.set_probe_result("drop")
+        assert tp.resolve_policy("upstream", "kimi-k2.5") == "drop"
+
+    def test_upstream_mode_falls_back_to_rules_without_a_probe(self):
+        tp.set_probe_result(None)
+        assert tp.resolve_policy("upstream", "deepseek-r1") == "drop"
+
+    def test_auto_mode_ignores_the_probe_result(self):
+        tp.set_probe_result("drop")
+        # "auto" is rules + 400 learning, never the startup probe.
+        assert tp.resolve_policy("auto", "deepseek-v4.1") == "turn"
+
     def test_rules_mode_ignores_a_learned_correction(self):
         tp.note_upstream_rejection(
             400, "reasoning_content must be passed back", "m"
