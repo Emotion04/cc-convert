@@ -81,6 +81,41 @@ def _instance_to_response(inst: InstanceProfile, status: dict | None = None) -> 
         d["instance_pid"] = None
         d["instance_started_at"] = None
         d["instance_uptime"] = None
+
+    # Effective reasoning policy. A persisted correction may have overridden
+    # the user's choice; expose that so the UI can mention it once instead of
+    # alerting on every reply.
+    from cc_convert.thinking_policy import (
+        MANUAL_MODES,
+        PolicyContext,
+        load_correction,
+        rule_for_model,
+    )
+
+    correction = None
+    if not inst.thinking_history_force_manual:
+        correction = load_correction(
+            PolicyContext(
+                instance_id=inst.id,
+                base_url=inst.upstream_base_url,
+                model=inst.target_model,
+                upstream_format=inst.upstream_format,
+            )
+        )
+
+    if correction:
+        d["thinking_history_effective"] = correction["policy"]
+        d["thinking_history_corrected"] = True
+        d["thinking_history_correction_reason"] = correction.get("reason")
+    else:
+        d["thinking_history_effective"] = (
+            inst.thinking_history
+            if inst.thinking_history in MANUAL_MODES
+            else rule_for_model(inst.target_model)
+        )
+        d["thinking_history_corrected"] = False
+        d["thinking_history_correction_reason"] = None
+
     return d
 
 
@@ -122,6 +157,9 @@ def _validate_instance_body(data: dict, require_key: bool = True) -> list[str]:
             errors.append(
                 "thinking_history must be one of: " + ", ".join(MODES)
             )
+    for flag in ("thinking_history_auto_correct", "thinking_history_force_manual"):
+        if flag in data and not isinstance(data[flag], bool):
+            errors.append(f"{flag} must be a boolean")
     # target_model is optional — empty means passthrough
     return errors
 
@@ -219,6 +257,12 @@ async def create_instance(request: Request):
         client_opus_model=data.get("client_opus_model", ""),
         client_haiku_model=data.get("client_haiku_model", ""),
         thinking_history=data.get("thinking_history", "upstream"),
+        thinking_history_auto_correct=bool(
+            data.get("thinking_history_auto_correct", True)
+        ),
+        thinking_history_force_manual=bool(
+            data.get("thinking_history_force_manual", False)
+        ),
         auto_start=bool(data.get("auto_start", True)),
     )
 
@@ -459,6 +503,42 @@ async def detect_format(request: Request):
     from cc_convert.profile_store import detect_upstream_format as _detect
     fmt = await _detect(base_url, api_key)
     return {"format": fmt}
+
+
+@web_router.post("/api/probe-thinking")
+async def probe_thinking(request: Request):
+    """Probe the upstream and recommend a reasoning-history mode.
+
+    Uses at most two requests with max_tokens=1. Advisory only — the user
+    still chooses and saves.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON body")
+
+    url = (data.get("url") or "").strip()
+    key = (data.get("key") or "").strip()
+    model = (data.get("model") or "").strip()
+    instance_id = data.get("instance_id")
+
+    if instance_id and (not key or key.startswith("***")):
+        store = _get_store(request)
+        for inst in store.instances:
+            if inst.id == instance_id:
+                key = inst.upstream_api_key
+                url = url or inst.upstream_base_url
+                model = model or inst.target_model
+                break
+
+    if not url:
+        raise HTTPException(400, detail="url is required")
+    if not model:
+        raise HTTPException(400, detail="请先填写目标模型，再执行探测")
+
+    from cc_convert.thinking_policy import probe_upstream
+
+    return await probe_upstream(url, key, model)
 
 
 @web_router.get("/api/ports/overview")

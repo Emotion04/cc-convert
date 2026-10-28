@@ -321,6 +321,7 @@ async def create_message(
         cast(MessageCreateParams, anthropic_params),
         enabled_server_tools=enabled_server_tools if has_server_tools else None,
         thinking_history=settings.thinking_history,
+        resolved_model=resolved_model,
     )
     openai_params: dict[str, Any] = dict(openai_params_obj)  # type: ignore
 
@@ -394,7 +395,7 @@ async def create_message(
                         raw_text = response.reason_phrase or ""
                     # In "follow upstream" mode, learn from a 400 that rejects
                     # our reasoning shape so later requests adapt.
-                    note_upstream_rejection(model, response.status_code, raw_text)
+                    note_upstream_rejection(response.status_code, raw_text, model)
 
                     error_message = (raw_text or "").strip()
                     if not error_message:

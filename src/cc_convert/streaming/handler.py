@@ -64,7 +64,7 @@ async def _stream_response(
                 error_text = error_body.decode("utf-8", errors="replace").strip()
                 # In "follow upstream" mode, remember a reasoning-shape 400 so
                 # later requests adapt (see thinking_policy.py).
-                note_upstream_rejection(model, response.status_code, error_text)
+                note_upstream_rejection(response.status_code, error_text, model)
                 try:
                     error_json = json.loads(error_text) if error_text else {}
                     error_msg = error_json.get("error", {}).get("message") or error_text

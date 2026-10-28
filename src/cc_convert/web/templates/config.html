@@ -104,18 +104,47 @@
                                 class="w-5 h-5 rounded-full bg-stone-100 text-stone-500 hover:bg-stone-200 text-[11px] font-bold cursor-pointer"
                                 title="查看各厂商做法">?</button>
                     </label>
-                    <select x-model="formData.thinking_history"
-                            class="input-field w-full px-4 py-2.5 rounded-xl text-sm text-stone-800">
-                        <option value="upstream">遵循上游（推荐：内置规则 + 依据 400 自动调整）</option>
-                        <option value="rules">按内置规则（根据模型厂商）</option>
-                        <option value="turn">仅当前轮（含整条工具调用链）</option>
-                        <option value="keep">全部回传</option>
-                        <option value="drop">全部丢弃</option>
-                    </select>
+                    <div class="flex gap-2">
+                        <select x-model="formData.thinking_history"
+                                class="input-field flex-1 px-4 py-2.5 rounded-xl text-sm text-stone-800">
+                            <option value="upstream">遵循上游（推荐：内置规则 + 依据 400 自动调整）</option>
+                            <option value="rules">按内置规则（根据模型厂商）</option>
+                            <option value="turn">仅当前轮（含整条工具调用链）</option>
+                            <option value="keep">全部回传</option>
+                            <option value="drop">全部丢弃</option>
+                        </select>
+                        <button type="button" @click="probeThinking()"
+                                :disabled="thinkingProbe.status === 'probing'"
+                                class="btn-secondary px-4 py-2.5 rounded-xl text-xs font-semibold text-stone-600 cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-wait">
+                            <span x-text="thinkingProbe.status === 'probing' ? '探测中…' : '探测'"></span>
+                        </button>
+                    </div>
+                    <p x-show="thinkingProbe.status === 'done'" class="text-xs mt-1.5 text-teal-600"
+                       x-text="'建议：' + thinkingProbe.policy + ' — ' + thinkingProbe.evidence"></p>
+                    <p x-show="thinkingProbe.status === 'fail'" class="text-xs mt-1.5 text-amber-600"
+                       x-text="thinkingProbe.evidence"></p>
                     <p class="text-xs text-stone-400 mt-1.5">
                         「仅当前轮」回传最后一次用户输入之后的**全部** assistant 推理（包括多步工具调用），
                         更早轮次全部丢弃：满足需要工具轮回传的上游，同时避免重发历史推理。
                     </p>
+                    <div class="mt-2 space-y-1.5">
+                        <label class="flex items-start gap-2 text-xs text-stone-600 cursor-pointer">
+                            <input type="checkbox" x-model="formData.thinking_history_auto_correct" class="mt-0.5 rounded">
+                            <span>自动纠正：上游返回相关 400 时自动调整后续请求（不会重试当前请求）</span>
+                        </label>
+                        <label class="flex items-start gap-2 text-xs text-stone-600 cursor-pointer">
+                            <input type="checkbox" x-model="formData.thinking_history_force_manual" class="mt-0.5 rounded">
+                            <span>强制手动优先：忽略自动纠正，始终使用我选择的模式</span>
+                        </label>
+                    </div>
+                    <div x-show="thinkingCorrected" x-cloak
+                         class="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                        <p class="text-xs leading-relaxed text-amber-700">
+                            该实例曾被自动纠正为
+                            <span class="font-mono" x-text="thinkingCorrectedTo"></span>。
+                            修改 URL / 目标模型 / 协议后会自动失效并重新判断。
+                        </p>
+                    </div>
                 </div>
 
                 <!-- Upstream API Key -->
@@ -276,8 +305,13 @@ function instanceConfig() {
             auto_start: true,
             upstream_format: 'auto',
             thinking_history: 'upstream',
+            thinking_history_auto_correct: true,
+            thinking_history_force_manual: false,
             detected_format: '',
         },
+        thinkingProbe: { status: 'idle', policy: '', evidence: '' },
+        thinkingCorrected: false,
+        thinkingCorrectedTo: '',
         originalData: null,
         instanceId: null,
         isEdit: false,
@@ -325,8 +359,12 @@ function instanceConfig() {
                     auto_start: data.auto_start !== false,
                     upstream_format: data.upstream_format || 'auto',
                     thinking_history: data.thinking_history || 'upstream',
+                    thinking_history_auto_correct: data.thinking_history_auto_correct !== false,
+                    thinking_history_force_manual: data.thinking_history_force_manual === true,
                     detected_format: '',
                 };
+                this.thinkingCorrected = !!data.thinking_history_corrected;
+                this.thinkingCorrectedTo = data.thinking_history_effective || '';
             } catch (e) {
                 showToast('加载实例失败: ' + e.message, 'error');
             }
@@ -372,6 +410,47 @@ function instanceConfig() {
             } catch (e) {
                 this.formatStatus = 'fail';
                 this.formData.upstream_format = 'chat_completions';
+            }
+        },
+
+        async probeThinking() {
+            if (this.thinkingProbe.status === 'probing') return;
+            this.thinkingProbe = { status: 'probing', policy: '', evidence: '' };
+            try {
+                const r = await fetch('/api/probe-thinking', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CCCONVERT-CSRF': getCsrfToken(),
+                    },
+                    body: JSON.stringify({
+                        url: (this.formData.upstream_base_url || '').trim(),
+                        key: (this.formData.upstream_api_key || '').trim(),
+                        model: (this.formData.target_model || '').trim(),
+                        instance_id: this.instanceId,
+                    }),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    this.thinkingProbe = {
+                        status: 'fail',
+                        policy: '',
+                        evidence: data.detail || ('HTTP ' + r.status),
+                    };
+                    return;
+                }
+                this.thinkingProbe = {
+                    status: 'done',
+                    policy: data.policy || '',
+                    evidence: data.evidence || '',
+                };
+                if (data.policy) this.formData.thinking_history = data.policy;
+            } catch (e) {
+                this.thinkingProbe = {
+                    status: 'fail',
+                    policy: '',
+                    evidence: '探测失败: ' + e.message,
+                };
             }
         },
 

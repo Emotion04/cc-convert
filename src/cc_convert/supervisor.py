@@ -331,7 +331,8 @@ class InstanceSupervisor:
         """
         allowed = {"name", "port", "upstream_base_url", "upstream_api_key", "target_model", "auto_start", "upstream_format",
                    "client_model", "client_sonnet_model", "client_opus_model", "client_haiku_model",
-                   "thinking_history"}
+                   "thinking_history", "thinking_history_auto_correct",
+                   "thinking_history_force_manual"}
         patch = {k: v for k, v in patch.items() if k in allowed}
         if not patch:
             return {"success": True}
@@ -353,6 +354,8 @@ class InstanceSupervisor:
             "client_haiku_model": instance.client_haiku_model,
             "upstream_format": instance.upstream_format,
             "thinking_history": instance.thinking_history,
+            "thinking_history_auto_correct": instance.thinking_history_auto_correct,
+            "thinking_history_force_manual": instance.thinking_history_force_manual,
             "auto_start": instance.auto_start,
         }
 

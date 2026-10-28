@@ -242,6 +242,7 @@ def convert_anthropic_to_openai(
     anthropic_params: MessageCreateParams,
     enabled_server_tools: list[type] | None = None,
     thinking_history: str = "upstream",
+    resolved_model: str | None = None,
 ) -> CompletionCreateParams:
     """
     Convert Anthropic MessageCreateParams to OpenAI CompletionCreateParams.
@@ -317,7 +318,7 @@ def convert_anthropic_to_openai(
         # them. Strict providers (DeepSeek V4 / Kimi / GLM) require reasoning on
         # every one of those, so we keep everything after the last real user
         # input and drop the previous turns.
-        effective_policy = resolve_policy(thinking_history, model)
+        effective_policy = resolve_policy(thinking_history, resolved_model or model)
         turn_start = 0
         for index, candidate in enumerate(messages):
             role = (

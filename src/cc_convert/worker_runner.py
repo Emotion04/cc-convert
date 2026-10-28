@@ -94,6 +94,18 @@ def run_worker() -> None:
     settings.host = host
     settings.port = port
 
+    # Install the reasoning-history context (rules, corrections, fingerprint).
+    from cc_convert import thinking_policy
+
+    thinking_policy.configure(
+        instance_id=instance_id,
+        base_url=settings.openai_base_url,
+        model=settings.default_model,
+        upstream_format=settings.upstream_format,
+        auto_correct=settings.thinking_history_auto_correct,
+        force_manual=settings.thinking_history_force_manual,
+    )
+
     if not settings.openai_api_key:
         logging.error("openai_api_key is required but not set")
         sys.exit(1)

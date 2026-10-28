@@ -8,8 +8,20 @@ from cc_convert.converter import convert_anthropic_to_openai
 
 
 @pytest.fixture(autouse=True)
-def _clear_learned():
+def _context():
+    tp.configure(
+        instance_id="inst_test",
+        base_url="https://api.example.com/v1",
+        model="m",
+        upstream_format="chat_completions",
+    )
     tp.reset_learned()
+    tp.configure(
+        instance_id="inst_test",
+        base_url="https://api.example.com/v1",
+        model="m",
+        upstream_format="chat_completions",
+    )
     yield
     tp.reset_learned()
 
@@ -42,38 +54,93 @@ class TestRules:
 
 class TestResolvePolicy:
     @pytest.mark.parametrize("mode", ["keep", "drop", "turn"])
-    def test_manual_modes_win(self, mode):
+    def test_manual_modes_win_without_correction(self, mode):
         assert tp.resolve_policy(mode, "deepseek-r1") == mode
 
-    def test_rules_mode_ignores_learned(self):
-        tp.note_upstream_rejection("m", 400, "reasoning_content must be passed back")
-        assert tp.resolve_policy("rules", "m") == "turn"
+    def test_auto_correct_overrides_manual_mode(self):
+        tp.note_upstream_rejection(
+            400, "reasoning_content must be passed back", "m"
+        )
+        # Default is auto_correct=True, so the correction wins over "drop".
+        assert tp.resolve_policy("drop", "m") == "keep"
 
-    def test_upstream_mode_uses_learned_override(self):
-        tp.note_upstream_rejection("m", 400, "reasoning_content must be passed back")
-        assert tp.resolve_policy("upstream", "m") == "keep"
+    def test_force_manual_ignores_correction(self):
+        tp.configure(
+            instance_id="inst_test",
+            base_url="https://api.example.com/v1",
+            model="m",
+            upstream_format="chat_completions",
+            force_manual=True,
+        )
+        tp.note_upstream_rejection(
+            400, "reasoning_content must be passed back", "m"
+        )
+        assert tp.resolve_policy("drop", "m") == "drop"
 
-    def test_upstream_mode_falls_back_to_rules(self):
-        assert tp.resolve_policy("upstream", "deepseek-r1") == "drop"
+    def test_auto_correct_disabled_only_records_nothing(self):
+        tp.configure(
+            instance_id="inst_test",
+            base_url="https://api.example.com/v1",
+            model="m",
+            upstream_format="chat_completions",
+            auto_correct=False,
+        )
+        assert (
+            tp.note_upstream_rejection(
+                400, "reasoning_content must be passed back", "m"
+            )
+            is None
+        )
+        assert tp.resolve_policy("drop", "m") == "drop"
+
+    def test_rules_mode_falls_back_to_rules(self):
+        assert tp.resolve_policy("rules", "deepseek-r1") == "drop"
+        assert tp.resolve_policy("rules", "deepseek-v4.1") == "turn"
 
 
 class TestLearning:
     def test_missing_reasoning_learns_keep(self):
         policy = tp.note_upstream_rejection(
-            "kimi-k2", 400, "thinking is enabled but reasoning_content is missing"
+            400,
+            "thinking is enabled but reasoning_content is missing",
+            "kimi-k2",
         )
         assert policy == "keep"
+        assert tp.resolve_policy("upstream", "kimi-k2") == "keep"
 
     def test_forbidden_reasoning_learns_drop(self):
         policy = tp.note_upstream_rejection(
-            "r1", 400, "reasoning_content is not allowed in this request"
+            400, "reasoning_content is not allowed in this request", "r1"
         )
         assert policy == "drop"
+        assert tp.resolve_policy("upstream", "r1") == "drop"
 
     def test_unrelated_error_is_ignored(self):
-        assert tp.note_upstream_rejection("m", 400, "invalid model") is None
-        assert tp.note_upstream_rejection("m", 500, "reasoning failed") is None
-        assert tp.learned_policy("m") is None
+        assert tp.note_upstream_rejection(400, "invalid model", "m") is None
+        assert tp.note_upstream_rejection(500, "reasoning failed", "m") is None
+
+    def test_correction_is_persisted_with_fingerprint(self):
+        tp.note_upstream_rejection(
+            400, "reasoning_content must be passed back", "m"
+        )
+        stored = tp.load_correction()
+        assert stored is not None
+        assert stored["policy"] == "keep"
+        assert stored["fingerprint"] == tp.fingerprint()
+
+    def test_changed_upstream_config_invalidates_correction(self):
+        tp.note_upstream_rejection(
+            400, "reasoning_content must be passed back", "m"
+        )
+        # The user edits the base URL: same instance, different upstream.
+        tp.configure(
+            instance_id="inst_test",
+            base_url="https://other.example.com/v1",
+            model="m",
+            upstream_format="chat_completions",
+        )
+        assert tp.load_correction() is None
+        assert tp.resolve_policy("upstream", "deepseek-r1") == "drop"
 
 
 def _multi_turn():
@@ -227,3 +294,75 @@ def test_worker_settings_carry_the_mode():
     )
 
     assert build_worker_settings(store, inst)["thinking_history"] == "drop"
+
+
+class TestProbe:
+    """probe_upstream makes at most two max_tokens=1 requests."""
+
+    @staticmethod
+    def _client(responses):
+        class Fake:
+            def __init__(self):
+                self.calls = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url, headers=None, json=None):
+                from types import SimpleNamespace
+
+                self.calls.append(json)
+                item = responses.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                return SimpleNamespace(status_code=item[0], text=item[1])
+
+        return Fake()
+
+    def _run(self, responses, model="m"):
+        import asyncio
+        from unittest.mock import patch
+
+        client = self._client(responses)
+        with patch("httpx.AsyncClient", return_value=client):
+            result = asyncio.run(
+                tp.probe_upstream("https://api.example.com/v1", "k", model)
+            )
+        return result, client
+
+    def test_rejects_reasoning_means_drop(self):
+        result, _ = self._run([(400, "reasoning_content is not allowed")])
+        assert result["policy"] == "drop"
+
+    def test_tool_loop_requires_reasoning_means_turn(self):
+        result, client = self._run(
+            [(200, "ok"), (400, "reasoning_content must be passed back")]
+        )
+        assert result["policy"] == "turn"
+        assert len(client.calls) == 2
+
+    def test_no_signal_defaults_to_turn(self):
+        result, _ = self._run([(200, "ok"), (200, "ok")])
+        assert result["policy"] == "turn"
+
+    def test_connection_error_defaults_to_turn(self):
+        import httpx
+
+        result, _ = self._run([httpx.ConnectError("")])
+        assert result["policy"] == "turn"
+        assert "无法连接" in result["evidence"]
+
+    def test_missing_model_skips_probing(self):
+        import asyncio
+        from unittest.mock import patch
+
+        client = self._client([])
+        with patch("httpx.AsyncClient", return_value=client):
+            result = asyncio.run(
+                tp.probe_upstream("https://api.example.com/v1", "k", "")
+            )
+        assert result["policy"] == "turn"
+        assert client.calls == []

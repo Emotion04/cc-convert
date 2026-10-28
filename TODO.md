@@ -46,6 +46,11 @@
   - `turn`（默认，仅最后一次 assistant）兼容需要工具轮回传的上游，同时避免重发全部历史推理
   - `upstream` 在 `rules` 基础上，会从与推理相关的 400 中学习并调整后续请求
   - 面板的「?」弹窗展示 7 家厂商的官方做法与来源
+  - 自动纠正结果按 `(base_url, target_model, upstream_format)` 指纹持久化到
+    `instances/<id>/thinking_learning.json`；改动 URL/模型/协议后自动失效
+  - 新增 `thinking_history_auto_correct`（默认开）与 `thinking_history_force_manual`
+  - 新增「探测」按钮：最多 2 次 `max_tokens=1` 请求，自动给出建议模式
+  - 纠正只写一次 WARNING 日志 + 编辑页提示，不会每条回复都打扰
   - 已知限制：上游**没有**标准化接口可查询该策略，"遵循上游" 实际是内置规则 + 错误学习
 - [ ] **content 中的字面 `<thinking>` 标签（暂不修）**
   - 上游若把推理写成 `<thinking>...</thinking>` 放在 `content` 里（而非

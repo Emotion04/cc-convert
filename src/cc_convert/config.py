@@ -316,6 +316,14 @@ class Settings(BaseSettings):
         description="How much previous-turn reasoning to send upstream: "
         "upstream, rules, turn, keep, drop",
     )
+    thinking_history_auto_correct: bool = Field(
+        default=True,
+        description="Correct the mode when the upstream rejects it with a 400",
+    )
+    thinking_history_force_manual: bool = Field(
+        default=False,
+        description="Ignore upstream corrections; always honour the selected mode",
+    )
     model_mapping: list[ModelMappingRule] = Field(
         default_factory=list,
         description="List of model name mapping rules (from -> to, supports * wildcards)"

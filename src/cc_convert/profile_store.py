@@ -103,6 +103,14 @@ class InstanceProfile(BaseModel):
         default="upstream",
         description="How much previous-turn reasoning to send upstream",
     )
+    thinking_history_auto_correct: bool = Field(
+        default=True,
+        description="Correct the mode automatically when the upstream rejects it with a 400",
+    )
+    thinking_history_force_manual: bool = Field(
+        default=False,
+        description="Ignore upstream corrections; always honour the selected mode",
+    )
     auto_start: bool = True
 
     # -- validators --------------------------------------------------------
@@ -366,6 +374,8 @@ def build_worker_settings(store: ProfileStore, instance: InstanceProfile) -> dic
         "model_mapping": [],
         "upstream_format": instance.upstream_format,
         "thinking_history": instance.thinking_history,
+        "thinking_history_auto_correct": instance.thinking_history_auto_correct,
+        "thinking_history_force_manual": instance.thinking_history_force_manual,
     }
 
 
