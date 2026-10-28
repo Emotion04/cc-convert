@@ -48,6 +48,26 @@ from cc_convert.utils import (
 )
 
 
+def _cache_fingerprint(params: dict[str, Any]) -> str:
+    """Short hash of the request prefix, for diagnosing cache misses.
+
+    Only the first message (the system prompt) and the tool definitions are
+    hashed, because that is where an implicit-prefix cache diverges first. No
+    content is logged.
+    """
+    import hashlib
+
+    messages = params.get("messages") or []
+    head = messages[0] if messages else {}
+    payload = json.dumps(
+        {"head": head, "tools": params.get("tools")},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
 def describe_upstream_error(exc: Exception, url: str) -> str:
     """Describe a failed upstream request without ever producing an empty message.
 
@@ -324,6 +344,17 @@ async def create_message(
         resolved_model=resolved_model,
     )
     openai_params: dict[str, Any] = dict(openai_params_obj)  # type: ignore
+
+    # Cache diagnostics: when the prefix hash changes between two consecutive
+    # requests, everything after the divergence is a cache miss. Comparing the
+    # hashes across requests tells you whether the instability is in the
+    # system prompt, the tool definitions, or the conversation itself.
+    logger.info(
+        "[cache] prefix=%s msgs=%d policy=%s",
+        _cache_fingerprint(openai_params),
+        len(openai_params.get("messages") or []),
+        settings.thinking_history,
+    )
 
     # Log converted OpenAI request (remove internal fields)
     log_params = {k: v for k, v in openai_params.items() if not k.startswith("_")}
