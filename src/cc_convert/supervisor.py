@@ -51,7 +51,10 @@ def find_free_port(start: int = 18000, end: int = 29999, exclude: Optional[set[i
 def _find_pid_by_port(port: int) -> Optional[int]:
     """Find the PID of the process listening on *port* (cross-platform).
 
-    Windows uses ``netstat -ano``; POSIX uses ``lsof``.
+    Windows uses ``netstat -ano`` with a ``Get-NetTCPConnection`` fallback:
+    netstat can miss listeners in some environments (notably when the process
+    runs inside a network-isolated job), which used to leave an orphaned worker
+    occupying the port and made the next start fail with WinError 10048.
     """
     try:
         if platform.system() == "Windows":
@@ -67,6 +70,28 @@ def _find_pid_by_port(port: int) -> Optional[int]:
                             return int(parts[-1])
                     except ValueError:
                         continue
+
+            # Fallback: the TCP table API behind Get-NetTCPConnection sees
+            # listeners that netstat sometimes does not.
+            try:
+                ps = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        "(Get-NetTCPConnection -LocalPort "
+                        f"{port} -State Listen -ErrorAction SilentlyContinue "
+                        "| Select-Object -First 1 -ExpandProperty OwningProcess)",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                text = (ps.stdout or "").strip()
+                if text.isdigit() and int(text) > 0:
+                    return int(text)
+            except (subprocess.SubprocessError, OSError):
+                pass
             return None
         else:
             result = subprocess.run(
@@ -146,6 +171,32 @@ class InstanceSupervisor:
             return False
         if instance.port < 1 or instance.port > 65535:
             return False
+
+        # 2a. Evict a worker left over from a previous manager process.
+        #     Its PID is recorded in the instance pidfile; netstat-based lookup
+        #     is not reliable in every environment (it can miss listeners), so
+        #     prefer the recorded PID. Only kill it when the name still looks
+        #     like our runtime, to avoid hitting a recycled PID.
+        stale_pid = self._read_recorded_worker_pid(instance.id)
+        if stale_pid is not None:
+            current = self._processes.get(instance.id)
+            if current is None or current.pid != stale_pid:
+                from cc_convert.daemon import _is_process_running
+
+                name = (_process_name(stale_pid) or "").lower()
+                looks_like_ours = "python" in name or "ccconvert" in name
+                if looks_like_ours and _is_process_running(stale_pid):
+                    logger.warning(
+                        "Evicting stale worker PID %d (%s) for instance %s",
+                        stale_pid,
+                        name or "?",
+                        instance.id,
+                    )
+                    self._terminate_pid(stale_pid)
+                    for _ in range(25):
+                        if not _is_process_running(stale_pid):
+                            break
+                        await asyncio.sleep(0.2)
 
         # 2. Port recovery. If the port is held by a dead/crashed worker (or
         #    any bystander), evict it so the new worker can bind.
@@ -588,6 +639,14 @@ class InstanceSupervisor:
                     path.unlink()
             except OSError:
                 pass
+
+    @staticmethod
+    def _read_recorded_worker_pid(instance_id: str) -> int | None:
+        """Read the worker PID recorded by a previous manager, if any."""
+        try:
+            return int(get_instance_pid_file(instance_id).read_text().strip())
+        except (OSError, ValueError):
+            return None
 
     @staticmethod
     def _terminate_pid(pid: int) -> None:

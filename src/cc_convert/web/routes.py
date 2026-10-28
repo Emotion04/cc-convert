@@ -298,6 +298,21 @@ async def get_instance(request: Request, instance_id: str):
     raise HTTPException(404, detail="Instance not found")
 
 
+@web_router.get("/api/instances/{instance_id}/key")
+async def get_instance_key(request: Request, instance_id: str):
+    """Reveal the stored upstream key for the edit form.
+
+    The dashboard binds to localhost and is CSRF-protected; keeping the key
+    write-only made the edit form look empty and left users unable to tell
+    which key was configured.
+    """
+    store = _get_store(request)
+    for inst in store.instances:
+        if inst.id == instance_id:
+            return {"key": inst.upstream_api_key or ""}
+    raise HTTPException(404, detail="Instance not found")
+
+
 @web_router.patch("/api/instances/{instance_id}")
 async def update_instance(request: Request, instance_id: str):
     """Update an instance.  Partial update with special key handling."""

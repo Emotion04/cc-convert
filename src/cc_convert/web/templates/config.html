@@ -170,9 +170,9 @@
                     </div>
                     <p class="text-xs text-stone-400 mt-1.5"
                        x-text="isEdit
-                           ? (formData.upstream_api_key && formData.upstream_api_key.indexOf('***') === 0
-                               ? '当前已配置：' + formData.upstream_api_key + '。保持此值或留空表示不修改。'
-                               : '留空则保持不变。输入新密钥来替换。')
+                           ? (formData.upstream_api_key
+                               ? '当前已配置，点击右侧眼睛可展开查看。输入新值可替换。'
+                               : '当前未配置密钥。')
                            : '你的 OpenAI 或兼容 API 密钥'"></p>
                     <!-- Clear key checkbox (edit mode only) -->
                     <label x-show="isEdit" class="flex items-center gap-2 mt-2 cursor-pointer">
@@ -380,7 +380,7 @@ function instanceConfig() {
                     name: data.name || '',
                     port: data.port || 0,
                     upstream_base_url: data.upstream_base_url || '',
-                    upstream_api_key: data.key_last4 ? ('***' + data.key_last4) : '',
+                    upstream_api_key: '',
                     target_model: data.target_model || '',
                     probe_model: data.probe_model || '',
                     client_model: data.client_model || '',
@@ -396,6 +396,15 @@ function instanceConfig() {
                 };
                 this.thinkingCorrected = !!data.thinking_history_corrected;
                 this.thinkingCorrectedTo = data.thinking_history_effective || '';
+                // The instance response masks the key; fetch the real one so the
+                // form shows what is actually configured (the eye reveals it).
+                try {
+                    const kr = await fetch(`/api/instances/${this.instanceId}/key`);
+                    if (kr.ok) {
+                        const kd = await kr.json();
+                        this.formData.upstream_api_key = kd.key || '';
+                    }
+                } catch (e) { /* keep empty */ }
             } catch (e) {
                 showToast('加载实例失败: ' + e.message, 'error');
             }

@@ -4,6 +4,7 @@ Main entry point for the cc-convert proxy server.
 """
 
 import argparse
+import asyncio
 import logging
 import os
 import secrets
@@ -293,17 +294,29 @@ def create_manager_app(store, supervisor) -> FastAPI:
     Returns:
         Configured FastAPI application for the manager dashboard
     """
+    import contextlib
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Runs inside the uvicorn event loop: initialise the shared HTTP client
-        # and launch auto-start instances here so no other event loop is used.
+        # here so no other event loop is used.
         sup = app.state.supervisor
         await sup.ensure_client()
-        await sup.startup_all()
-        yield
-        await sup.shutdown_all()
+
+        # Auto-start instances in the background. Waiting for them here blocks
+        # uvicorn from listening until every instance has been tried, which is
+        # tens of seconds when several upstreams are unreachable — the dashboard
+        # would look "started but unreachable".
+        startup_task = asyncio.create_task(sup.startup_all())
+        try:
+            yield
+        finally:
+            if not startup_task.done():
+                startup_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await startup_task
+            await sup.shutdown_all()
 
     # docs_url/redoc_url=None: the manager serves a custom docs page at /docs
     # (see web/routes.py docs_page) instead of the default Swagger UI.
