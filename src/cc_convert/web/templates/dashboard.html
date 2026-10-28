@@ -92,13 +92,12 @@
                                 <p class="text-[10px] mt-0.5 whitespace-nowrap">
                                     <span class="px-1.5 py-0.5 rounded"
                                           :class="probe[inst.id].recommended ? 'bg-teal-50 text-teal-600' : 'bg-stone-100 text-stone-400'"
-                                          x-text="'responses ' + (probe[inst.id].recommended === 'responses' ? '✅' : '✕')"></span>
-                                    <span class="ml-1 px-1.5 py-0.5 rounded bg-stone-100 text-stone-500">chat ✅</span>
+                                          x-text="probe[inst.id].error ? '探测失败' : ('推荐: ' + (probe[inst.id].recommended === 'responses' ? 'responses' : 'chat'))"></span>
                                     <button x-show="probe[inst.id].recommended === 'responses' && inst.upstream_format !== 'responses'"
                                             @click="switchToResponses(inst)"
                                             :disabled="!!busy[inst.id]"
                                             class="ml-1 px-1.5 py-0.5 rounded bg-brand-50 text-brand-600 font-semibold cursor-pointer hover:bg-brand-100">
-                                        切换到 responses
+                                        切换
                                     </button>
                                 </p>
                             </template>

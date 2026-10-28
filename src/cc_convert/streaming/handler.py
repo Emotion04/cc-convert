@@ -220,14 +220,15 @@ async def _stream_response(
                         logger.debug(
                             f"[Anthropic Stream Event] message_delta: {json.dumps(delta_event, ensure_ascii=False)}"
                         )
-                        cr_read = cache_read_input_tokens or 0
-                        total_in = cr_read + input_tokens
-                        logger.info(
-                            "[cache] hit=%d input=%d ratio=%s%%",
-                            cr_read,
-                            anthropic_input_tokens(usage, input_tokens),
-                            int(cr_read * 100 / total_in) if total_in else 0,
-                        )
+                        if logger.isEnabledFor(logging.DEBUG):
+                            cr_read = cache_read_input_tokens or 0
+                            total_in = cr_read + input_tokens
+                            logger.debug(
+                                "[cache] hit=%d input=%d ratio=%s%%",
+                                cr_read,
+                                anthropic_input_tokens(usage, input_tokens),
+                                int(cr_read * 100 / total_in) if total_in else 0,
+                            )
                         yield f"event: message_delta\ndata: {json.dumps(delta_event)}\n\n"
                         sent_message_delta = True
                     continue

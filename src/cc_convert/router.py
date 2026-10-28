@@ -349,12 +349,15 @@ async def create_message(
     # requests, everything after the divergence is a cache miss. Comparing the
     # hashes across requests tells you whether the instability is in the
     # system prompt, the tool definitions, or the conversation itself.
-    logger.info(
-        "[cache] prefix=%s msgs=%d policy=%s",
-        _cache_fingerprint(openai_params),
-        len(openai_params.get("messages") or []),
-        settings.thinking_history,
-    )
+    # DEBUG only: one line per request is fine while diagnosing, but INFO would
+    # add noise (and disk I/O) during normal use.
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "[cache] prefix=%s msgs=%d policy=%s",
+            _cache_fingerprint(openai_params),
+            len(openai_params.get("messages") or []),
+            settings.thinking_history,
+        )
 
     # Log converted OpenAI request (remove internal fields)
     log_params = {k: v for k, v in openai_params.items() if not k.startswith("_")}

@@ -458,7 +458,36 @@ async def detect_upstream_format(
             return None
 
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        # 1. Responses — must actually answer the question.
+        # 1. Chat completions first. Despite being the older surface it is the
+        #    one that reliably reports prompt-cache usage on relays — measured
+        #    on aiaimax: chat cached 86–99%, while /responses reported
+        #    cached_tokens=0 and a *larger* input count for the same request.
+        chat_ok = False
+        try:
+            response = await _post(
+                client,
+                "/chat/completions",
+                {
+                    "model": model,
+                    "max_tokens": _PROBE_MAX_OUTPUT,
+                    "messages": [{"role": "user", "content": _PROBE_PROMPT}],
+                },
+            )
+            chat_ok = response.status_code == 200 and _chat_has_content(
+                _payload(response)
+            )
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.RemoteProtocolError,
+            httpx.ConnectTimeout,
+        ):
+            chat_ok = False
+
+        if chat_ok:
+            return "chat_completions"
+
+        # 2. Responses only as a fallback: it must actually answer the question.
         try:
             response = await _post(
                 client,
@@ -467,9 +496,9 @@ async def detect_upstream_format(
                     "model": model,
                     "input": _PROBE_PROMPT,
                     "max_output_tokens": _PROBE_MAX_OUTPUT,
-                    # Keep the probe cheap for reasoning models: without this a
-                    # "1+1" can still burn hundreds of reasoning tokens.
-                    "reasoning": {"effort": "minimal"},
+                    # Not every model accepts "minimal"; the relay rejects the
+                    # whole request when it does not. "low" is broadly accepted.
+                    "reasoning": {"effort": "low"},
                 },
             )
             if response.status_code == 200 and _responses_has_content(
@@ -484,27 +513,8 @@ async def detect_upstream_format(
         ):
             pass
 
-        # 2. Chat completions — the universal fallback.
-        try:
-            response = await _post(
-                client,
-                "/chat/completions",
-                {
-                    "model": model,
-                    "max_tokens": _PROBE_MAX_OUTPUT,
-                    "messages": [{"role": "user", "content": _PROBE_PROMPT}],
-                },
-            )
-            # Report the default either way: when nothing answers, staying on
-            # chat/completions keeps behaviour unchanged.
-            return "chat_completions"
-        except (
-            httpx.ConnectError,
-            httpx.TimeoutException,
-            httpx.RemoteProtocolError,
-            httpx.ConnectTimeout,
-        ):
-            return "chat_completions"
+        # 3. Nothing answered usefully — keep the conservative default.
+        return "chat_completions"
 
 
 async def check_upstream_base_url(

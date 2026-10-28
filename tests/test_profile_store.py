@@ -292,7 +292,12 @@ class TestCheckUpstreamBaseUrl:
 
 
 class TestDetectUpstreamFormat:
-    """Responses is preferred only when a real Responses payload comes back."""
+    """chat/completions is preferred; Responses is only a fallback.
+
+    On the relay we measured, chat reported 86-99% cache hits while /responses
+    reported cached_tokens=0 and a larger input token count for the same
+    request, so "newer" is not "better" here.
+    """
 
     @staticmethod
     def _client(steps):
@@ -339,41 +344,43 @@ class TestDetectUpstreamFormat:
             )
         return result, client
 
-    def test_valid_responses_payload_wins(self):
-        result, client = self._run(
-            [
-                (
-                    200,
-                    {
-                        "object": "response",
-                        "output": [
-                            {
-                                "type": "message",
-                                "content": [{"type": "text", "text": "2"}],
-                            }
-                        ],
-                    },
-                )
-            ]
+    @staticmethod
+    def _chat_ok():
+        return (200, {"choices": [{"message": {"content": "2"}}]})
+
+    @staticmethod
+    def _responses_ok():
+        return (
+            200,
+            {
+                "object": "response",
+                "output": [
+                    {"type": "message", "content": [{"type": "text", "text": "2"}]}
+                ],
+            },
         )
+
+    def test_chat_is_preferred_when_both_work(self):
+        result, client = self._run([self._chat_ok()])
+        assert result == "chat_completions"
+        assert client.posted[0].endswith("/chat/completions")
+
+    def test_responses_is_used_only_when_chat_fails(self):
+        result, client = self._run([(404, ValueError("no")), self._responses_ok()])
         assert result == "responses"
-        assert client.posted[0].endswith("/responses")
+        assert client.posted[1].endswith("/responses")
 
     def test_empty_output_is_not_treated_as_responses(self):
-        # 200 with the right envelope but nothing usable must not win.
         result, _ = self._run(
-            [(200, {"object": "response", "output": []}), (200, {"choices": []})]
+            [
+                (404, ValueError("no")),
+                (200, {"object": "response", "output": []}),
+            ]
         )
         assert result == "chat_completions"
 
-    def test_invalid_responses_payload_falls_back_to_chat(self):
-        result, _ = self._run([(200, {"foo": "bar"}), (200, {"choices": []})])
-        assert result == "chat_completions"
-
-    def test_responses_404_uses_chat(self):
-        result, _ = self._run([(404, ValueError("not found")), (200, {"choices": []})])
-        assert result == "chat_completions"
-
-    def test_no_endpoint_reports_chat_default(self):
-        result, _ = self._run([(404, ValueError("no")), (404, ValueError("no"))])
+    def test_nothing_answering_falls_back_to_chat(self):
+        result, _ = self._run(
+            [(404, ValueError("no")), (404, ValueError("no"))]
+        )
         assert result == "chat_completions"
