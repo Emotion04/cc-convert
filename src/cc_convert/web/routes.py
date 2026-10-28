@@ -253,6 +253,7 @@ async def create_instance(request: Request):
         upstream_base_url=data["upstream_base_url"],
         upstream_api_key=data["upstream_api_key"],
         target_model=data.get("target_model", ""),
+        probe_model=data.get("probe_model", ""),
         client_model=data.get("client_model", ""),
         client_sonnet_model=data.get("client_sonnet_model", ""),
         client_opus_model=data.get("client_opus_model", ""),
@@ -518,6 +519,58 @@ async def detect_format(request: Request):
 
     fmt = await _detect(base_url, api_key, model=model)
     return {"format": fmt}
+
+
+@web_router.post("/api/upstream-models")
+async def upstream_models(request: Request):
+    """List the models the upstream exposes, for the config form's dropdown."""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON body")
+
+    url = (data.get("url") or "").strip()
+    key = (data.get("key") or "").strip()
+    instance_id = data.get("instance_id")
+
+    if instance_id and (not key or key.startswith("***")):
+        store = _get_store(request)
+        for inst in store.instances:
+            if inst.id == instance_id:
+                key = inst.upstream_api_key
+                url = url or inst.upstream_base_url
+                break
+
+    if not url:
+        raise HTTPException(400, detail="url is required")
+
+    import httpx
+
+    headers = {}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+            response = await client.get(f"{url.rstrip('/')}/models", headers=headers)
+    except Exception as exc:
+        raise HTTPException(502, detail=f"{type(exc).__name__}: {exc}")
+
+    if response.status_code != 200:
+        raise HTTPException(
+            response.status_code,
+            detail=f"上游返回 HTTP {response.status_code}",
+        )
+    try:
+        payload = response.json()
+    except ValueError:
+        raise HTTPException(502, detail="上游返回的不是 JSON")
+
+    models = [
+        item.get("id")
+        for item in (payload.get("data") or [])
+        if isinstance(item, dict) and item.get("id")
+    ]
+    return {"models": models}
 
 
 @web_router.post("/api/probe-thinking")

@@ -91,6 +91,10 @@ class InstanceProfile(BaseModel):
     upstream_base_url: str
     upstream_api_key: str = Field(default="")
     target_model: str = Field(default="", description="Target model name. Leave empty to passthrough Claude Code's model name unchanged.")
+    probe_model: str = Field(
+        default="",
+        description="Model used for the UI's probe buttons when target_model is empty",
+    )
     client_model: str = Field(default="", description="ANTHROPIC_MODEL override for Claude Code (optional)")
     client_haiku_model: str = Field(default="", description="ANTHROPIC_DEFAULT_HAIKU_MODEL override for Claude Code (optional)")
     client_opus_model: str = Field(default="", description="ANTHROPIC_DEFAULT_OPUS_MODEL override for Claude Code (optional)")
