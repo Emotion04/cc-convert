@@ -551,9 +551,29 @@ async def probe_thinking(request: Request):
     if not model:
         raise HTTPException(400, detail="请先填写目标模型，再执行探测")
 
-    from cc_convert.thinking_policy import probe_upstream
+    from cc_convert.thinking_policy import probe_upstream, save_correction_for
 
-    return await probe_upstream(url, key, model)
+    result = await probe_upstream(url, key, model)
+
+    # "apply" lets the dashboard persist the probe result for this instance.
+    # The worker re-reads the correction on every request, so it takes effect
+    # without a restart.
+    if data.get("apply") and instance_id and result.get("policy") in (
+        "turn",
+        "keep",
+        "drop",
+    ):
+        save_correction_for(
+            instance_id=instance_id,
+            base_url=url,
+            model=model,
+            upstream_format=(data.get("upstream_format") or ""),
+            policy=result["policy"],
+            reason=f"manual probe: {result.get('evidence', '')}",
+        )
+        result["applied"] = True
+
+    return result
 
 
 @web_router.post("/api/reprobe-formats")

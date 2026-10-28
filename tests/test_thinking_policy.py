@@ -105,6 +105,30 @@ class TestResolvePolicy:
         tp.set_probe_result(None)
         assert tp.resolve_policy("upstream", "deepseek-r1") == "drop"
 
+    def test_upstream_mode_prefers_a_manual_correction_over_the_probe(self):
+        tp.set_probe_result("turn")
+        tp.save_correction_for(
+            instance_id="inst_test",
+            base_url="https://api.example.com/v1",
+            model="m",
+            upstream_format="chat_completions",
+            policy="drop",
+            reason="manual probe",
+        )
+        # A manual probe from the dashboard is fresher than the startup probe.
+        assert tp.resolve_policy("upstream", "m") == "drop"
+
+    def test_fingerprint_ignores_upstream_format(self):
+        a = tp.PolicyContext(
+            instance_id="i", base_url="https://x/v1", model="m",
+            upstream_format="auto",
+        )
+        b = tp.PolicyContext(
+            instance_id="i", base_url="https://x/v1", model="m",
+            upstream_format="chat_completions",
+        )
+        assert tp.fingerprint(a) == tp.fingerprint(b)
+
     def test_auto_mode_ignores_the_probe_result(self):
         tp.set_probe_result("drop")
         # "auto" is rules + 400 learning, never the startup probe.

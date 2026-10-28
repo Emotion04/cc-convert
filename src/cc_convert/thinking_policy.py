@@ -129,9 +129,15 @@ def context() -> PolicyContext:
 
 
 def fingerprint(ctx: PolicyContext | None = None) -> str:
-    """Stable key for the upstream configuration, not for the request model."""
+    """Stable key for the upstream configuration.
+
+    Deliberately excludes ``upstream_format``: the worker resolves ``"auto"``
+    to a concrete format at startup, and a manual probe from the dashboard sees
+    the value before that resolution. Keying on URL + target model keeps the
+    two sides matching, and still invalidates when either is edited.
+    """
     ctx = ctx or _CTX
-    raw = f"{(ctx.base_url or '').rstrip('/')}|{ctx.model or ''}|{ctx.upstream_format or ''}"
+    raw = f"{(ctx.base_url or '').rstrip('/')}|{ctx.model or ''}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -141,6 +147,29 @@ def _state_file(ctx: PolicyContext) -> Path | None:
     from cc_convert.runtime_paths import get_instance_dir
 
     return get_instance_dir(ctx.instance_id) / "thinking_learning.json"
+
+
+def save_correction_for(
+    *,
+    instance_id: str,
+    base_url: str,
+    model: str,
+    upstream_format: str,
+    policy: EffectivePolicy,
+    reason: str,
+) -> None:
+    """Persist a probe result for an instance, from the manager process.
+
+    The worker re-reads this file on every request (``load_correction``), so a
+    manual probe from the dashboard takes effect without restarting it.
+    """
+    ctx = PolicyContext(
+        instance_id=instance_id,
+        base_url=base_url,
+        model=model,
+        upstream_format=upstream_format,
+    )
+    _save_correction(ctx, policy, reason)
 
 
 def load_correction(ctx: PolicyContext | None = None) -> dict | None:
@@ -211,15 +240,16 @@ def resolve_policy(mode: str | None, model: str | None = None) -> EffectivePolic
     if mode == "rules":
         return rule_for_model(model or ctx.model)
 
-    # "upstream" = the real probe performed at worker startup. Inconclusive
-    # probes fall back to the learned correction, then to the built-in rules.
+    # "upstream" = the real probe performed at worker startup. A persisted
+    # correction wins over it: that is either a manual UI probe or a learned
+    # 400, i.e. a fresher observation than the startup one.
     if mode == "upstream":
-        if ctx.probe_result:
-            return ctx.probe_result
         if ctx.auto_correct:
             correction = load_correction(ctx)
             if correction:
                 return correction["policy"]  # type: ignore[return-value]
+        if ctx.probe_result:
+            return ctx.probe_result
         return rule_for_model(model or ctx.model)
 
     # "auto" = researched rules plus corrections learned from upstream 400s.
