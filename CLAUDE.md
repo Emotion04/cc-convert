@@ -44,6 +44,7 @@ Claude Code ──→ CC Convert Worker (本地端口) ──→ 上游 API (Ope
 
 ### 其他特性
 
+- **Token 用量统计**：`usage/` 模块在所有代理路径采集 usage（内存 15 分钟桶 + 5 s 批量落 SQLite，热路径零 IO）；Dashboard `/usage` 展示 KPI/趋势/构成/分组对比。拿不到 usage 记 `unreported` 不按 0 记账；**新增任何调用上游的代码必须接 recorder**（开发指南 3.6）
 - **服务端 Web Search**：内置 Tavily / 通晓 引擎，任何模型获得联网能力（Anthropic 与 Responses 端点均支持）
 - **Claude Code 标记清理**：`_normalize_claude_code_markup()` 将内部 XML 标记转为 `[标注: 内容]` 纯文本
 - **模型注入**：实例可选配置 `client_model` / `client_sonnet_model` / `client_opus_model` / `client_haiku_model`，仅用于 Dashboard"复制配置"输出 `ANTHROPIC_MODEL` 等环境变量，不传给 Worker
@@ -68,9 +69,11 @@ src/cc_convert/
 ├── streaming/handler.py    # SSE 流式响应处理
 ├── tools/               # 服务端工具（web_search 等）
 ├── server_tools/        # 服务端工具注册和实现
+├── usage/               # Token 用量：recording 归一化 / ledger 台账 / store SQLite（usage.db）
 ├── web/
-│   ├── routes.py        # Dashboard API（实例 CRUD、端口管理、格式探测）
-│   └── templates/       # Jinja2 + Alpine.js 前端页面
+│   ├── routes.py        # Dashboard API（实例 CRUD、端口管理、格式探测、用量汇总）
+│   ├── templates/       # Jinja2 + Alpine.js 前端页面
+│   └── static/          # 本地 vendored 前端资源（Chart.js），勿改回 CDN
 └── utils/               # 工具函数
 ```
 
@@ -87,7 +90,7 @@ ccconvert open       # 浏览器打开 Dashboard
 ## 配置
 
 - 配置文件：`~/.ccconvert/config.toml`（环境变量 `CCCONVERT_CONFIG_DIR` 可覆盖）
-- 运行时数据（`manager.pid` / `manager.json` / `manager.log` / `instances/` / `logs/`）：`%LOCALAPPDATA%\ccconvert`（Windows）或 `~/.local/share/ccconvert`，环境变量 `CCCONVERT_RUNTIME_DIR` 可覆盖。日志目录也走这里（`get_log_dir()`），勿再另算一份
+- 运行时数据（`manager.pid` / `manager.json` / `manager.log` / `instances/` / `logs/` / `usage.db`）：`%LOCALAPPDATA%\ccconvert`（Windows）或 `~/.local/share/ccconvert`，环境变量 `CCCONVERT_RUNTIME_DIR` 可覆盖。日志目录也走这里（`get_log_dir()`），勿再另算一份
 - 首次运行自动创建，编辑添加 API Key；完整的用户使用说明见 `docs/使用规范.md`
 
 ## 测试
