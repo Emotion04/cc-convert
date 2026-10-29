@@ -294,9 +294,10 @@ class TestCheckUpstreamBaseUrl:
 class TestDetectUpstreamFormat:
     """chat/completions is preferred; Responses is only a fallback.
 
-    On the relay we measured, chat reported 86-99% cache hits while /responses
-    reported cached_tokens=0 and a larger input token count for the same
-    request, so "newer" is not "better" here.
+    Chat is the surface the proxy was built against and the one that every
+    existing converter path assumes. The earlier cache-based justification for
+    this order did not reproduce (see the note in ``detect_upstream_format``),
+    so it is deliberately not restated here.
     """
 
     @staticmethod
@@ -369,6 +370,43 @@ class TestDetectUpstreamFormat:
         result, client = self._run([(404, ValueError("no")), self._responses_ok()])
         assert result == "responses"
         assert client.posted[1].endswith("/responses")
+
+    def test_chat_timeout_keeps_chat_and_skips_the_second_probe(self):
+        """A slow upstream is not an upstream without chat.
+
+        Falling through to /responses on a timeout used to switch healthy but
+        slow relays to "responses", and /v1/messages always sends a chat body,
+        so every real request then failed.
+        """
+        import asyncio
+        from unittest.mock import patch
+
+        import httpx
+
+        from cc_convert.profile_store import detect_upstream_format
+
+        class TimeoutClient:
+            def __init__(self):
+                self.posted = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url, headers=None, json=None):
+                self.posted.append(url)
+                raise httpx.ReadTimeout("slow")
+
+        client = TimeoutClient()
+        with patch("httpx.AsyncClient", return_value=client):
+            result = asyncio.run(
+                detect_upstream_format("https://api.example.com/v1", "k", model="m")
+            )
+
+        assert result == "chat_completions"
+        assert len(client.posted) == 1
 
     def test_empty_output_is_not_treated_as_responses(self):
         result, _ = self._run(

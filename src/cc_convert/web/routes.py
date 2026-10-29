@@ -90,6 +90,7 @@ def _instance_to_response(inst: InstanceProfile, status: dict | None = None) -> 
         MANUAL_MODES,
         PolicyContext,
         load_correction,
+        policy_label,
         rule_for_model,
     )
 
@@ -106,6 +107,7 @@ def _instance_to_response(inst: InstanceProfile, status: dict | None = None) -> 
 
     if correction:
         d["thinking_history_effective"] = correction["policy"]
+        d["thinking_history_effective_label"] = policy_label(correction["policy"])
         d["thinking_history_corrected"] = True
         d["thinking_history_correction_reason"] = correction.get("reason")
     else:
@@ -113,6 +115,9 @@ def _instance_to_response(inst: InstanceProfile, status: dict | None = None) -> 
             inst.thinking_history
             if inst.thinking_history in MANUAL_MODES
             else rule_for_model(inst.target_model)
+        )
+        d["thinking_history_effective_label"] = policy_label(
+            d["thinking_history_effective"]
         )
         d["thinking_history_corrected"] = False
         d["thinking_history_correction_reason"] = None
@@ -178,12 +183,13 @@ async def dashboard_page(request: Request):
 @web_router.get("/config", response_class=HTMLResponse)
 async def config_page(request: Request):
     """Instance create/edit form.  Query param ?id=<id> for edit."""
-    from cc_convert.thinking_policy import MODES, PROVIDER_NOTES
+    from cc_convert.thinking_policy import MODES, PROVIDER_NOTES, policy_label
 
+    notes = [{**note, "label": policy_label(note["policy"])} for note in PROVIDER_NOTES]
     return templates.TemplateResponse(
         request,
         "config.html",
-        {"thinking_modes": MODES, "provider_notes": PROVIDER_NOTES},
+        {"thinking_modes": MODES, "provider_notes": notes},
     )
 
 
@@ -621,15 +627,25 @@ async def probe_thinking(request: Request):
 
     from cc_convert.thinking_policy import probe_upstream, save_correction_for
 
-    result = await probe_upstream(url, key, model)
+    result = await probe_upstream(
+        url,
+        key,
+        model,
+        upstream_format=(data.get("upstream_format") or ""),
+    )
 
     # "apply" lets the dashboard persist the probe result for this instance.
     # The worker re-reads the correction on every request, so it takes effect
     # without a restart.
-    if data.get("apply") and instance_id and result.get("policy") in (
-        "turn",
-        "keep",
-        "drop",
+    #
+    # Only an ``ok`` result may be applied: an unreachable or inconclusive
+    # upstream says nothing about the reasoning shape, and persisting "turn"
+    # from it would silently override the mode the user chose.
+    if (
+        data.get("apply")
+        and instance_id
+        and result.get("ok")
+        and result.get("policy") in ("turn", "keep", "drop")
     ):
         save_correction_for(
             instance_id=instance_id,
@@ -637,7 +653,7 @@ async def probe_thinking(request: Request):
             model=model,
             upstream_format=(data.get("upstream_format") or ""),
             policy=result["policy"],
-            reason=f"manual probe: {result.get('evidence', '')}",
+            reason=f"手动探测：{result.get('evidence', '')}",
         )
         result["applied"] = True
 
@@ -693,14 +709,18 @@ async def reprobe_formats(request: Request):
 async def ports_overview(request: Request):
     """Health summary for the manager port and every instance port."""
     supervisor = _get_supervisor(request)
-    return supervisor.get_port_overview()
+    # Port discovery shells out (netstat / Get-NetTCPConnection) and probes the
+    # upstream; keep it off the event loop so the dashboard stays responsive.
+    return await asyncio.to_thread(supervisor.get_port_overview)
 
 
 @web_router.post("/api/ports/{instance_id}/check")
 async def port_check(request: Request, instance_id: str):
     """Check a single instance's port + upstream health."""
     supervisor = _get_supervisor(request)
-    result = supervisor.check_instance_port(instance_id)
+    result = await asyncio.to_thread(
+        supervisor.check_instance_port, instance_id
+    )
     if "error" in result:
         raise HTTPException(404, detail=result["error"])
     return result

@@ -51,13 +51,22 @@ async def _stream_response(
     headers: dict,
     json_data: dict,
     model: str,
+    *,
+    upstream_body: dict | None = None,
+    responses_upstream: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     Stream response from OpenAI and convert to Anthropic format.
+
+    ``json_data`` is always the chat-shaped request, used locally for input
+    token estimation. ``upstream_body`` is what actually gets posted; when the
+    upstream speaks the Responses API it is the translated body, and the SSE
+    stream is translated back to chat chunks before parsing.
     """
+    body = upstream_body if upstream_body is not None else json_data
     try:
         async with client.stream(
-            "POST", url, headers=headers, json=json_data
+            "POST", url, headers=headers, json=body
         ) as response:
             if response.status_code != 200:
                 error_body = await response.aread()
@@ -100,7 +109,15 @@ async def _stream_response(
             sent_message_delta = False
             pending_text_prefix = ""
 
-            async for line in response.aiter_lines():
+            lines = response.aiter_lines()
+            if responses_upstream:
+                from cc_convert.upstream_responses import (
+                    responses_sse_as_chat_sse,
+                )
+
+                lines = responses_sse_as_chat_sse(lines)
+
+            async for line in lines:
                 if not line.startswith("data: "):
                     continue
 

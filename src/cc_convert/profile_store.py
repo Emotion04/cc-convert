@@ -464,11 +464,15 @@ async def detect_upstream_format(
             return None
 
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        # 1. Chat completions first. Despite being the older surface it is the
-        #    one that reliably reports prompt-cache usage on relays — measured
-        #    on aiaimax: chat cached 86–99%, while /responses reported
-        #    cached_tokens=0 and a *larger* input count for the same request.
+        # 1. Chat completions first. It is the surface every existing code path
+        #    was built against, so it is the safe default when both answer.
+        #    An earlier measurement on aiaimax suggested chat also reported
+        #    better cache numbers (86–99% vs cached_tokens=0), but that does
+        #    not reproduce consistently — the same relay now reports hits and
+        #    zeros on both surfaces, and /responses counts input tokens
+        #    differently. Do not treat cache usage as a reason to pick one.
         chat_ok = False
+        chat_unreachable = False
         try:
             response = await _post(
                 client,
@@ -489,8 +493,18 @@ async def detect_upstream_format(
             httpx.ConnectTimeout,
         ):
             chat_ok = False
+            chat_unreachable = True
 
         if chat_ok:
+            return "chat_completions"
+
+        # A timeout or a connection failure is *not* evidence that chat is
+        # missing — only that this upstream is slow (reasoning relays routinely
+        # need 15–45 s for a "tiny" request) or down. Falling through to
+        # /responses here used to flip slow-but-healthy relays to "responses",
+        # and /v1/messages always sends a chat-shaped body, so the instance then
+        # failed every real request with 400/502.
+        if chat_unreachable:
             return "chat_completions"
 
         # 2. Responses only as a fallback: it must actually answer the question.

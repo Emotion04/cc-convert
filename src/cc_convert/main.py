@@ -608,7 +608,7 @@ Examples:
         sys.exit(0 if success else 1)
 
     elif args.command == "restart":
-        success = daemon.restart_daemon()
+        success = daemon.restart_daemon(port=args.port)
         if success:
             from cc_convert.profile_store import load_profile_store
             store = load_profile_store()

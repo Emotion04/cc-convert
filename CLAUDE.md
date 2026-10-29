@@ -20,6 +20,7 @@ Claude Code ──→ CC Convert Worker (本地端口) ──→ 上游 API (Ope
 
 - **Anthropic → OpenAI**：`router.py` 接收 `/v1/messages`（Anthropic 格式），`converter.py` 转为 OpenAI chat.completions 请求发给上游，响应再转回 Anthropic 格式
 - **Responses → Chat Completions**：`responses_converter.py` 让只实现 chat.completions 的后端（vLLM、SGLang）也能被 OpenAI Responses SDK 客户端调用（`/v1/responses`）
+- **Chat → Responses（上游只支持 Responses 时）**：`upstream_responses.py` 把内部构建的 Chat 请求体转成 Responses（`input`/`tools`/`reasoning`），响应与 SSE 再转回 Chat。`/v1/messages`、`/v1/chat/completions` 两条入口都用它，`/v1/responses` 在上下游同为 Responses 时直接透传（`_proxy_responses_passthrough`）。改这条路径必须同时看 `streaming/handler.py` 的 `responses_upstream` 分支
 - **原生透传**：`/v1/chat/completions` 原样转发，零转换开销，保留所有上游字段
 - 流式 SSE、工具调用（`tool_use` ↔ function call）、视觉输入、交错 thinking 推理块均支持
 
@@ -109,3 +110,11 @@ uv run pytest -q
 - **协议转换热路径**：`converter.py`、`streaming/handler.py`、`responses_converter.py` 是这座桥的核心（Claude Code 直接依赖），改动风险最高，需格外谨慎并补充测试
 - **路径解析统一走 `runtime_paths`**：不要在别处另实现一份，历史上 `profile_store` 自己读了个名字带空格的环境变量（`"CC Convert_CONFIG_DIR"`），导致文档承诺的目录覆盖长期失效
 - **dev 依赖两份声明必须同步**（见 `tests/test_dev_deps.py`）：`uv sync` 只装 dependency-group，漂移会让测试环境残缺
+
+## 文档
+
+- 文档索引与阅读顺序：[`docs/README.md`](docs/README.md)
+- **改代码前必读**：[`docs/不变量与陷阱.md`](docs/不变量与陷阱.md)（含已知缺陷清单）
+- 架构与请求路径：[`docs/架构总览.md`](docs/架构总览.md)
+- 为什么这么设计：[`docs/决策记录.md`](docs/决策记录.md)
+- 接手未完成任务：[`docs/HANDOFF.md`](docs/HANDOFF.md)

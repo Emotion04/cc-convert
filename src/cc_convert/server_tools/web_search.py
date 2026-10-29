@@ -31,25 +31,35 @@ class WebSearchServerTool(ServerTool):
 
     _tavily_client: ClassVar[TavilyClient | None] = None
     _tongxiao_client: ClassVar[TongXiaoClient | None] = None
+    # The cache key matters: a client built once with an empty key used to be
+    # reused for every later Settings object in the same process, so a worker
+    # (or a test) that first saw "no key" reported web search as disabled even
+    # after a key was configured.
+    _tavily_key: ClassVar[tuple[Any, float] | None] = None
+    _tongxiao_key: ClassVar[tuple[Any, float] | None] = None
 
     @classmethod
     def _get_tavily_client(cls, settings: Settings) -> TavilyClient:
-        """Get or create Tavily client singleton."""
-        if cls._tavily_client is None:
+        """Get or create the Tavily client for the current settings."""
+        key = (settings.tavily_api_key, settings.tavily_timeout)
+        if cls._tavily_client is None or cls._tavily_key != key:
             cls._tavily_client = TavilyClient(
                 api_key=settings.tavily_api_key,
                 timeout=settings.tavily_timeout,
             )
+            cls._tavily_key = key
         return cls._tavily_client
 
     @classmethod
     def _get_tongxiao_client(cls, settings: Settings) -> TongXiaoClient:
-        """Get or create TongXiao client singleton."""
-        if cls._tongxiao_client is None:
+        """Get or create the TongXiao client for the current settings."""
+        key = (settings.tongxiao_api_key, settings.tongxiao_timeout)
+        if cls._tongxiao_client is None or cls._tongxiao_key != key:
             cls._tongxiao_client = TongXiaoClient(
                 api_key=settings.tongxiao_api_key,
                 timeout=settings.tongxiao_timeout,
             )
+            cls._tongxiao_key = key
         return cls._tongxiao_client
 
     @classmethod

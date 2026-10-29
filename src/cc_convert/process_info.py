@@ -19,6 +19,7 @@ def process_name(pid: int) -> str:
                 ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=5,
             )
             for line in result.stdout.splitlines():
@@ -32,6 +33,7 @@ def process_name(pid: int) -> str:
                 ["ps", "-p", str(pid), "-o", "comm="],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=5,
             )
             if result.stdout.strip():

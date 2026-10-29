@@ -84,6 +84,7 @@ def run_worker() -> None:
     revision = int(data.get("revision", 0))
     host = data.get("host", "127.0.0.1")
     port = data.get("port")
+    parent_pid = data.get("parent_pid")
 
     if not instance_id or not internal_token or port is None:
         logging.error("Missing required keys (instance_id, internal_token, port)")
@@ -129,6 +130,36 @@ def run_worker() -> None:
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     _write_pid(pid_path)
 
+    # Step 6.1: Watch the manager. A hard stop (`ccconvert stop -f`, a crash)
+    # cannot run the supervisor's shutdown path, and on Windows the worker is
+    # not part of the manager's job object, so it would keep the port bound and
+    # make the next start fail with WinError 10048. Exit as soon as the manager
+    # disappears.
+    if isinstance(parent_pid, int) and parent_pid > 0:
+
+        def _watch_parent() -> None:
+            import time
+
+            from cc_convert.daemon import _is_process_running
+
+            while True:
+                time.sleep(2.0)
+                if not _is_process_running(parent_pid):
+                    try:
+                        logger.info(
+                            "Manager (PID %d) is gone, worker shutting down",
+                            parent_pid,
+                        )
+                        _remove_pid(pid_path)
+                    finally:
+                        os._exit(0)
+
+        threading.Thread(
+            target=_watch_parent,
+            name="parent-watch",
+            daemon=True,
+        ).start()
+
     # Step 6.5: Resolve "auto" once, at startup.
     # Previously "auto" was stored but never probed at runtime, so it silently
     # behaved like chat/completions. Probe now, with the real model when known,
@@ -165,32 +196,59 @@ def run_worker() -> None:
         )
 
     # "upstream" mode means a real probe, not just the built-in rules.
+    #
+    # Run it on a background thread: a probe against a reasoning relay can take
+    # 15–45 s (measured on aiaimax), and waiting here would keep the instance
+    # port closed for that whole time. Until the probe returns, the built-in
+    # rules are used, which is exactly the old behaviour for an inconclusive
+    # probe anyway.
     if settings.thinking_history == "upstream":
-        import asyncio
 
-        from cc_convert.thinking_policy import probe_upstream, set_probe_result
+        def _probe_thinking_history() -> None:
+            import asyncio
 
-        try:
-            probe = asyncio.run(
-                probe_upstream(
-                    settings.openai_base_url,
-                    settings.openai_api_key,
-                    model=settings.default_model or "ping",
-                    timeout=8.0,
+            from cc_convert.thinking_policy import (
+                STARTUP_PROBE_TIMEOUT,
+                probe_upstream,
+                set_probe_result,
+            )
+
+            try:
+                probe = asyncio.run(
+                    probe_upstream(
+                        settings.openai_base_url,
+                        settings.openai_api_key,
+                        model=settings.default_model or "ping",
+                        timeout=STARTUP_PROBE_TIMEOUT,
+                        upstream_format=settings.upstream_format,
+                    )
                 )
-            )
+            except Exception as exc:  # never crash the worker on a probe
+                logger.warning("Thinking-history probe failed: %s", exc)
+                set_probe_result(None)
+                return
+
             policy = probe.get("policy")
-            set_probe_result(
-                policy if policy in ("turn", "keep", "drop") else None
-            )
+            if not probe.get("ok") or policy not in ("turn", "keep", "drop"):
+                logger.info(
+                    "Thinking-history probe inconclusive, keeping the rules: %s",
+                    probe.get("evidence", ""),
+                )
+                set_probe_result(None)
+                return
+
+            set_probe_result(policy)
             logger.info(
                 "Thinking-history probe: %s (%s)",
                 policy,
                 probe.get("evidence", ""),
             )
-        except Exception as exc:  # never block startup on a probe
-            logger.warning("Thinking-history probe failed: %s", exc)
-            set_probe_result(None)
+
+        threading.Thread(
+            target=_probe_thinking_history,
+            name="thinking-probe",
+            daemon=True,
+        ).start()
 
     # Step 7: Create proxy app
     app = create_proxy_app(settings, instance_id, internal_token, revision=revision)

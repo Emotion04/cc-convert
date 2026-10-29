@@ -38,6 +38,10 @@ from cc_convert.tools import (
     _handle_with_server_tools,
 )
 from cc_convert.thinking_policy import note_upstream_rejection
+from cc_convert.upstream_responses import (
+    chat_body_to_responses_body,
+    responses_payload_to_chat_completion,
+)
 from cc_convert.utils.errors import upstream_diagnostic
 from cc_convert.utils import (
     _chunk_text,
@@ -156,6 +160,16 @@ async def _closing_stream(agen, client: httpx.AsyncClient, owned: bool):
     finally:
         if owned:
             await client.aclose()
+
+
+def _is_responses_upstream(settings: Settings) -> bool:
+    """True when the upstream serves the OpenAI Responses API only.
+
+    Callers must then translate the body they built (chat shape) with
+    ``chat_body_to_responses_body`` and translate the answer back.
+    """
+    fmt = getattr(settings, "upstream_format", "") or ""
+    return fmt == "responses"
 
 
 def _upstream_url(settings: Settings, endpoint: str) -> str:
@@ -334,7 +348,27 @@ async def create_message(
     server_tool_configs = ServerToolRegistry.extract_server_tools(
         [t if isinstance(t, dict) else t.model_dump() for t in tools]
     )
-    has_server_tools = len(server_tool_configs) > 0
+    # A tool the client asked for is only a *server* tool when the proxy can
+    # actually execute it. Without a configured provider (Tavily/TongXiao), the
+    # tool is dropped and the request goes through as a normal call — running
+    # the server-tool loop here would hand the handler an unconfigured client.
+    has_server_tools = bool(server_tool_configs) and bool(enabled_server_tools)
+    if server_tool_configs and not enabled_server_tools:
+        disabled_types = {tool_cls.tool_type for tool_cls, _ in server_tool_configs}
+        logger.warning(
+            "Client requested server tool(s) %s but no provider is configured; "
+            "forwarding the request without them.",
+            sorted(disabled_types),
+        )
+        # Drop the definitions here: the converter would otherwise turn an
+        # Anthropic server tool into an ordinary function tool the upstream
+        # cannot execute (and the client cannot answer).
+        anthropic_params["tools"] = [
+            tool
+            for tool in tools
+            if (tool.get("type") if isinstance(tool, dict) else getattr(tool, "type", None))
+            not in disabled_types
+        ]
 
     # Convert Anthropic params to OpenAI params
     openai_params_obj = convert_anthropic_to_openai(
@@ -381,6 +415,25 @@ async def create_message(
 
     url = _upstream_url(settings, "messages")
 
+    # When the upstream only speaks the Responses API, translate the body we
+    # built (chat shape) once and reuse it for every call path below.
+    responses_upstream = _is_responses_upstream(settings)
+    upstream_body = (
+        chat_body_to_responses_body(openai_params)
+        if responses_upstream
+        else openai_params
+    )
+
+    def _to_chat(payload: Any) -> Any:
+        if responses_upstream and isinstance(payload, dict):
+            # Some relays omit ``object`` but still answer in Responses shape.
+            looks_like_response = payload.get("object") == "response" or (
+                "output" in payload and "choices" not in payload
+            )
+            if looks_like_response:
+                return responses_payload_to_chat_completion(payload, model)
+        return payload
+
     # Handle server tools (works in both streaming and non-streaming modes)
     if has_server_tools:
         tool_classes = [t[0] for t in server_tool_configs]
@@ -390,7 +443,16 @@ async def create_message(
         # Remove stream_options if present (not allowed when stream=False)
         openai_params.pop("stream_options", None)
         result = await _handle_with_server_tools(
-            openai_params, url, headers, settings, tool_classes, model
+            openai_params,
+            url,
+            headers,
+            settings,
+            tool_classes,
+            model,
+            request_transform=(
+                chat_body_to_responses_body if responses_upstream else None
+            ),
+            response_transform=_to_chat if responses_upstream else None,
         )
 
         # If original request was streaming, convert result to streaming format
@@ -405,7 +467,15 @@ async def create_message(
         client, owned = _get_http_client(request)
         return StreamingResponse(
             _closing_stream(
-                _stream_response(client, url, headers, openai_params, model),
+                _stream_response(
+                    client,
+                    url,
+                    headers,
+                    openai_params,
+                    model,
+                    upstream_body=upstream_body,
+                    responses_upstream=responses_upstream,
+                ),
                 client,
                 owned,
             ),
@@ -414,7 +484,9 @@ async def create_message(
     else:
         async with _client_scope(request) as client:
             try:
-                response = await client.post(url, headers=headers, json=openai_params)
+                response = await client.post(
+                    url, headers=headers, json=upstream_body
+                )
 
                 if response.status_code != 200:
                     raw_text = response.text
@@ -477,6 +549,8 @@ async def create_message(
                 logger.debug(
                     f"[OpenAI Response] {json.dumps(openai_completion, ensure_ascii=False, indent=2)}"
                 )
+
+                openai_completion = _to_chat(openai_completion)
 
                 from openai.types.chat import ChatCompletion
 
@@ -723,12 +797,24 @@ async def openai_chat_completions(
         headers["OpenAI-Project"] = settings.openai_project_id
 
     stream = body_json.get("stream", False)
+    responses_upstream = _is_responses_upstream(settings)
+    upstream_body = (
+        chat_body_to_responses_body(body_json)
+        if responses_upstream
+        else body_json
+    )
 
     if stream:
         client, owned = _get_http_client(request)
         return StreamingResponse(
             _closing_stream(
-                _openai_stream_proxy(client, url, headers, body_json),
+                _openai_stream_proxy(
+                    client,
+                    url,
+                    headers,
+                    upstream_body,
+                    responses_upstream=responses_upstream,
+                ),
                 client,
                 owned,
             ),
@@ -737,7 +823,7 @@ async def openai_chat_completions(
 
     async with _client_scope(request) as client:
         try:
-            response = await client.post(url, headers=headers, json=body_json)
+            response = await client.post(url, headers=headers, json=upstream_body)
 
             if not response.content:
                 return JSONResponse(
@@ -760,6 +846,12 @@ async def openai_chat_completions(
                 f"[OpenAI Passthrough Response] {json.dumps(response_json, ensure_ascii=False)}"
             )
 
+            if responses_upstream and isinstance(response_json, dict):
+                if response_json.get("object") == "response":
+                    response_json = responses_payload_to_chat_completion(
+                        response_json, body_json.get("model", "")
+                    )
+
             return JSONResponse(status_code=response.status_code, content=response_json)
 
         except httpx.TimeoutException:
@@ -781,8 +873,14 @@ async def _openai_stream_proxy(
     url: str,
     headers: dict,
     body_json: dict,
+    *,
+    responses_upstream: bool = False,
 ) -> AsyncGenerator[str, None]:
-    """Stream-proxy an OpenAI request — pass chunks through unchanged."""
+    """Stream-proxy an OpenAI request — pass chunks through unchanged.
+
+    With ``responses_upstream`` the upstream emits Responses events, so they are
+    translated to chat chunks first; the client still asked for chat.
+    """
     try:
         async with client.stream("POST", url, headers=headers, json=body_json) as response:
             if response.status_code != 200:
@@ -794,7 +892,17 @@ async def _openai_stream_proxy(
                 yield "data: [DONE]\n\n"
                 return
 
-            async for line in response.aiter_lines():
+            lines = response.aiter_lines()
+            if responses_upstream:
+                from cc_convert.upstream_responses import (
+                    responses_sse_as_chat_sse,
+                )
+
+                async for chunk in responses_sse_as_chat_sse(lines):
+                    yield chunk
+                return
+
+            async for line in lines:
                 if line.startswith("data: "):
                     yield f"{line}\n\n"
                 elif line.strip() == "":
@@ -813,6 +921,85 @@ async def _openai_stream_proxy(
 # them to /v1/chat/completions for upstream backends that only implement the
 # chat-completions surface (vLLM, SGLang, …). The upstream response is then
 # translated back to the Responses format.
+#
+# When the upstream itself speaks Responses, the body is forwarded untouched
+# instead of making a lossy round trip through the chat shape.
+
+
+def _has_web_search_tool(body: dict[str, Any]) -> bool:
+    for tool in body.get("tools") or []:
+        if isinstance(tool, dict) and str(tool.get("type") or "").startswith(
+            "web_search"
+        ):
+            return True
+    return False
+
+
+async def _proxy_responses_passthrough(
+    request: Request, settings: Settings, body: dict[str, Any]
+):
+    """Forward a Responses request to a Responses upstream unchanged."""
+    url = _upstream_url(settings, "responses")
+    headers = {
+        **_build_upstream_auth(request, settings),
+        "Content-Type": "application/json",
+    }
+    if settings.openai_org_id:
+        headers["OpenAI-Organization"] = settings.openai_org_id
+    if settings.openai_project_id:
+        headers["OpenAI-Project"] = settings.openai_project_id
+
+    # Relays proxying a ChatGPT account reject stored responses.
+    body.setdefault("store", False)
+
+    if body.get("stream"):
+        client, owned = _get_http_client(request)
+        return StreamingResponse(
+            _closing_stream(
+                _openai_stream_proxy(client, url, headers, body), client, owned
+            ),
+            media_type="text/event-stream",
+        )
+
+    async with _client_scope(request) as client:
+        try:
+            response = await client.post(url, headers=headers, json=body)
+        except httpx.TimeoutException:
+            return JSONResponse(
+                status_code=504,
+                content={"error": {"message": "Request timed out", "type": "timeout_error"}},
+            )
+        except httpx.RequestError as e:
+            message = describe_upstream_error(e, url)
+            logger.error("[Responses Passthrough] %s", message)
+            return JSONResponse(
+                status_code=502,
+                content={"error": {"message": message, "type": "connection_error"}},
+            )
+
+        if not response.content:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": {
+                        "message": "Upstream API returned empty response",
+                        "type": "api_error",
+                    }
+                },
+            )
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as e:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": {
+                        "message": f"Failed to parse upstream response: {e}",
+                        "type": "api_error",
+                    }
+                },
+            )
+        return JSONResponse(status_code=response.status_code, content=payload)
 
 
 @openai_router.post("/responses", response_model=None)
@@ -824,7 +1011,6 @@ async def openai_responses(
     from cc_convert.responses_converter import (
         convert_chat_completion_to_responses,
         convert_responses_to_chat_completion,
-        stream_responses_from_chat_completion,
     )
 
     try:
@@ -869,6 +1055,20 @@ async def openai_responses(
     if resolved_model != original_model:
         logger.debug("Model name mapped: %s -> %s", original_model, resolved_model)
         body_json["model"] = resolved_model
+
+    # Client and upstream both speak Responses: forward the body untouched.
+    #
+    # The local web-search loop below speaks chat/completions, so it cannot run
+    # against a Responses-only upstream: it would post a chat-shaped body to
+    # /responses and get a 400. Forward the tool instead and let the upstream
+    # handle it (or reject it clearly).
+    if _is_responses_upstream(settings):
+        if _has_web_search_tool(body_json):
+            logger.warning(
+                "Responses upstream: forwarding the web_search tool unchanged; "
+                "the local search provider is not used on this path."
+            )
+        return await _proxy_responses_passthrough(request, settings, body_json)
 
     instructions = body_json.get("instructions")
     if isinstance(instructions, list):

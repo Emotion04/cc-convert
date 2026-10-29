@@ -59,7 +59,11 @@ def _find_pid_by_port(port: int) -> Optional[int]:
     try:
         if platform.system() == "Windows":
             result = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True, timeout=5
+                ["netstat", "-ano"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=5,
             )
             for line in result.stdout.splitlines():
                 parts = line.split()
@@ -85,6 +89,7 @@ def _find_pid_by_port(port: int) -> Optional[int]:
                     ],
                     capture_output=True,
                     text=True,
+                    errors="replace",
                     timeout=10,
                 )
                 text = (ps.stdout or "").strip()
@@ -98,6 +103,7 @@ def _find_pid_by_port(port: int) -> Optional[int]:
                 ["lsof", "-t", "-i", f":{port}"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=5,
             )
             if result.returncode == 0 and result.stdout.strip():
@@ -173,34 +179,53 @@ class InstanceSupervisor:
             return False
 
         # 2a. Evict a worker left over from a previous manager process.
-        #     Its PID is recorded in the instance pidfile; netstat-based lookup
-        #     is not reliable in every environment (it can miss listeners), so
-        #     prefer the recorded PID. Only kill it when the name still looks
-        #     like our runtime, to avoid hitting a recycled PID.
-        stale_pid = self._read_recorded_worker_pid(instance.id)
-        if stale_pid is not None:
-            current = self._processes.get(instance.id)
-            if current is None or current.pid != stale_pid:
-                from cc_convert.daemon import _is_process_running
+        #     Two recordings are kept and either may be stale: the worker's own
+        #     pidfile (written by the worker) and the meta file (written by the
+        #     manager, holding the launcher shim's PID). They can disagree
+        #     because the venv launcher spawns a child; killing only the shim
+        #     used to leave the real worker holding the port. Evict both, with
+        #     the process tree, and only when the name still looks like ours to
+        #     avoid hitting a recycled PID.
+        from cc_convert.daemon import _is_process_running
 
-                name = (_process_name(stale_pid) or "").lower()
-                looks_like_ours = "python" in name or "ccconvert" in name
-                if looks_like_ours and _is_process_running(stale_pid):
-                    logger.warning(
-                        "Evicting stale worker PID %d (%s) for instance %s",
-                        stale_pid,
-                        name or "?",
-                        instance.id,
-                    )
-                    self._terminate_pid(stale_pid)
-                    for _ in range(25):
-                        if not _is_process_running(stale_pid):
-                            break
-                        await asyncio.sleep(0.2)
+        current = self._processes.get(instance.id)
+        candidates: set[int] = set()
+        recorded = self._read_recorded_worker_pid(instance.id)
+        if recorded is not None:
+            candidates.add(recorded)
+        meta = self._read_instance_meta(instance.id) or {}
+        meta_pid = meta.get("pid")
+        if isinstance(meta_pid, int):
+            candidates.add(meta_pid)
+
+        for stale_pid in candidates:
+            if current is not None and current.pid == stale_pid:
+                continue
+            # Everything below shells out (tasklist/taskkill/netstat), which
+            # blocks the event loop. Off-load it: the manager serves the
+            # dashboard and runs auto-start on the same loop, and a blocked
+            # loop turns every concurrent request into a timeout.
+            name = (
+                await asyncio.to_thread(_process_name, stale_pid) or ""
+            ).lower()
+            looks_like_ours = "python" in name or "ccconvert" in name
+            if not (looks_like_ours and _is_process_running(stale_pid)):
+                continue
+            logger.warning(
+                "Evicting stale worker PID %d (%s) for instance %s",
+                stale_pid,
+                name or "?",
+                instance.id,
+            )
+            await asyncio.to_thread(self._terminate_pid, stale_pid)
+            for _ in range(25):
+                if not _is_process_running(stale_pid):
+                    break
+                await asyncio.sleep(0.2)
 
         # 2. Port recovery. If the port is held by a dead/crashed worker (or
         #    any bystander), evict it so the new worker can bind.
-        port_owner = _find_pid_by_port(instance.port)
+        port_owner = await asyncio.to_thread(_find_pid_by_port, instance.port)
         if port_owner is not None:
             our_proc = self._processes.get(instance.id)
             if our_proc is not None and our_proc.pid == port_owner:
@@ -208,12 +233,13 @@ class InstanceSupervisor:
                 pass
             else:
                 # Stale occupant: forcibly evict.
+                owner_name = await asyncio.to_thread(_process_name, port_owner)
                 logging.warning(
                     "Port %d is held by PID %d (%s) — evicting for instance %s",
-                    instance.port, port_owner, _process_name(port_owner) or "?",
+                    instance.port, port_owner, owner_name or "?",
                     instance.id,
                 )
-                self._terminate_pid(port_owner)
+                await asyncio.to_thread(self._terminate_pid, port_owner)
                 # Wait up to 4 s for the OS to release the port.
                 for _ in range(20):
                     if not _is_port_in_use(instance.port):
@@ -269,12 +295,15 @@ class InstanceSupervisor:
             "settings_kwargs": settings_kwargs,
             "host": "127.0.0.1",
             "port": instance.port,
+            # The worker exits on its own when this PID disappears, so a hard
+            # manager stop cannot leave a worker holding the port forever.
+            "parent_pid": os.getpid(),
         })
         try:
             proc.stdin.write(stdin_payload.encode("utf-8"))
             proc.stdin.close()
         except Exception:
-            self._terminate_process(proc)
+            await asyncio.to_thread(self._terminate_process, proc)
             return False
 
         # 7. Poll /_ccconvert/status on http://127.0.0.1:{port}/_ccconvert/status
@@ -296,7 +325,7 @@ class InstanceSupervisor:
                     "Worker for %s exited early (rc=%s) on port %s: %s",
                     instance.id, proc.returncode, instance.port, stderr_tail,
                 )
-                self._terminate_process(proc)
+                await asyncio.to_thread(self._terminate_process, proc)
                 return False
 
             try:
@@ -320,7 +349,7 @@ class InstanceSupervisor:
             await asyncio.sleep(0.2)
 
         # 9. Health check failed -- tear down.
-        self._terminate_process(proc)
+        await asyncio.to_thread(self._terminate_process, proc)
         return False
 
     async def stop_instance(self, instance_id: str, force: bool = False) -> bool:
@@ -339,22 +368,8 @@ class InstanceSupervisor:
             self._cleanup_instance_files(instance_id)
             return True
 
-        try:
-            if platform.system() == "Windows":
-                # proc.terminate() maps to TerminateProcess on Windows — reliable.
-                # CTRL_BREAK_EVENT is not (the child must opt in to handle it).
-                proc.terminate()
-            else:
-                proc.terminate()
-
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                if force:
-                    proc.kill()
-                    proc.wait(timeout=3)
-        except Exception:
-            pass
+        # proc.wait() can block for up to 8 s — never do that on the event loop.
+        await asyncio.to_thread(self._terminate_and_wait, proc, force)
 
         self._cleanup_instance_files(instance_id)
         return True
@@ -563,16 +578,27 @@ class InstanceSupervisor:
     # ------------------------------------------------------------------
 
     async def startup_all(self) -> None:
-        """Start every instance with auto_start=True.  Log failures, don't block."""
-        for inst in self._store.instances:
-            if inst.auto_start:
-                ok = await self.start_instance(inst)
-                if not ok:
-                    # Log and continue. Previously a bare `pass`, which made
-                    # every auto-start failure on manager boot invisible.
-                    logger.warning(
-                        "Auto-start failed for instance %s (%s)", inst.id, inst.name
-                    )
+        """Start every instance with auto_start=True.  Log failures, don't block.
+
+        Instances start concurrently: each one needs ~10 s for its health poll
+        and they do not interact (separate ports, separate PIDs), so starting
+        seven of them in sequence made the dashboard look frozen for a minute
+        after every restart.
+        """
+        pending = [inst for inst in self._store.instances if inst.auto_start]
+        if not pending:
+            return
+
+        async def _start(inst) -> None:
+            ok = await self.start_instance(inst)
+            if not ok:
+                # Log and continue. Previously a bare `pass`, which made
+                # every auto-start failure on manager boot invisible.
+                logger.warning(
+                    "Auto-start failed for instance %s (%s)", inst.id, inst.name
+                )
+
+        await asyncio.gather(*(_start(inst) for inst in pending))
 
     async def shutdown_all(self) -> None:
         """Stop every running instance and clean up."""
@@ -650,17 +676,40 @@ class InstanceSupervisor:
 
     @staticmethod
     def _terminate_pid(pid: int) -> None:
-        """Kill a process by PID, cross-platform."""
+        """Kill a process **and its children**, cross-platform.
+
+        ``taskkill`` without ``/T`` only kills the launcher shim, leaving the
+        real worker alive and holding the port — that was the source of the
+        orphan workers that made the next start fail with WinError 10048.
+        """
         try:
             if platform.system() == "Windows":
                 subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
                     capture_output=True, timeout=10,
                 )
             else:
                 os.kill(pid, signal.SIGKILL)
         except Exception as exc:
             logging.warning("Failed to kill PID %d: %s", pid, exc)
+
+    @staticmethod
+    def _terminate_and_wait(proc: subprocess.Popen, force: bool = False) -> None:
+        """Terminate *proc* and wait for it, blocking up to ~8 s."""
+        try:
+            if proc.poll() is not None:
+                return
+            # proc.terminate() maps to TerminateProcess on Windows — reliable.
+            # CTRL_BREAK_EVENT is not (the child must opt in to handle it).
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if force:
+                    proc.kill()
+                    proc.wait(timeout=3)
+        except Exception:
+            pass
 
     @staticmethod
     def _terminate_process(proc: subprocess.Popen) -> None:

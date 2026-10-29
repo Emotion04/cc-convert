@@ -246,7 +246,7 @@ class TestStopDaemonAdvanced:
         sys.platform != "win32", reason="taskkill is the Windows force-kill path"
     )
     def test_stop_daemon_force_uses_taskkill_on_windows(self):
-        """On win32 the force path must use `taskkill /F`, never os.kill.
+        """On win32 the force path must use `taskkill /F /T`, never os.kill.
 
         This branch used to execute for real during the test suite — only
         os.kill was mocked, so `taskkill /F /PID 12345` actually ran and could
@@ -269,7 +269,7 @@ class TestStopDaemonAdvanced:
 
                                         assert result is True
                                         mock_run.assert_called_with(
-                                            ["taskkill", "/F", "/PID", "12345"],
+                                            ["taskkill", "/F", "/T", "/PID", "12345"],
                                             capture_output=True,
                                             timeout=10,
                                         )

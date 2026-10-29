@@ -31,7 +31,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 ThinkingHistoryMode = Literal["upstream", "auto", "rules", "turn", "keep", "drop"]
 EffectivePolicy = Literal["turn", "keep", "drop"]
@@ -42,6 +42,25 @@ MODES: tuple[str, ...] = ("upstream", "auto", "rules", "turn", "keep", "drop")
 DEFAULT_MODE: ThinkingHistoryMode = "auto"
 
 MANUAL_MODES = ("turn", "keep", "drop")
+
+#: User-facing labels. The dashboard and the probe API both render these, so a
+#: probe never prints a bare internal key ("turn") that the select does not show.
+POLICY_LABELS: dict[str, str] = {
+    "auto": "智能（auto）",
+    "upstream": "遵循上游（upstream）",
+    "rules": "严格规则（rules）",
+    "turn": "仅当前轮（turn）",
+    "keep": "全部回传（keep）",
+    "drop": "全部丢弃（drop）",
+}
+
+
+def policy_label(policy: str | None) -> str:
+    """Chinese label for a mode key; unknown keys pass through unchanged."""
+    if not policy:
+        return ""
+    return POLICY_LABELS.get(policy, policy)
+
 
 #: (substring matched against the resolved model name, policy, note)
 RULES: tuple[tuple[str, EffectivePolicy, str], ...] = (
@@ -308,11 +327,33 @@ def note_upstream_rejection(
     return policy
 
 
+#: Total budget for a probe, shared by both requests. The dashboard shows the
+#: same number as a countdown, so the UI and the server cannot disagree. The
+#: budget is deliberately generous for the first request: reasoning relays
+#: routinely take 10–20 s for a "tiny" request because they inject their own
+#: system prompt and gate the answer behind the model's reasoning phase
+#: (measured on aiaimax: 3.8–49 s with ``max_tokens=1``).
+PROBE_TIMEOUT = 20.0
+
+#: The startup probe runs in the background and must not outlive its usefulness.
+STARTUP_PROBE_TIMEOUT = PROBE_TIMEOUT
+
+
+def _probe_result(policy: str, evidence: str, ok: bool) -> dict:
+    return {
+        "policy": policy,
+        "label": policy_label(policy),
+        "evidence": evidence,
+        "ok": ok,
+    }
+
+
 async def probe_upstream(
     base_url: str,
     api_key: str = "",
     model: str = "",
-    timeout: float = 8.0,
+    timeout: float = PROBE_TIMEOUT,
+    upstream_format: str = "",
 ) -> dict:
     """Determine the reasoning-replay policy with at most two tiny requests.
 
@@ -324,24 +365,82 @@ async def probe_upstream(
        Providers that require it answer 400 ("must be passed back") — that
        means the policy must be ``turn``.
 
-    ``max_tokens`` is 1 for both probes. Anything inconclusive falls back to
-    ``turn``, the safest default.
+    ``max_tokens`` is 1 for both probes. ``timeout`` is the budget for the
+    **whole** probe, not per request: the dashboard counts down from the same
+    number, so a probe can never outlive what the UI promised. The result
+    carries ``ok=False`` when the upstream never produced a definite signal
+    (unreachable, timed out, endpoint missing, or both probes accepted
+    everything). Callers must not persist anything in that case: a failed probe
+    says nothing about the upstream and must not overwrite the user's choice.
+
+    ``upstream_format="responses"`` sends the translated Responses body to
+    ``/responses``, because that is the endpoint the proxy will actually use —
+    probing ``/chat/completions`` there would report a 404 and say nothing.
     """
+    import asyncio
+    import time
+
     import httpx
 
     base = (base_url or "").rstrip("/")
     if not base or not model:
-        return {"policy": "turn", "evidence": "缺少 base URL 或目标模型，未探测"}
+        return _probe_result("turn", "缺少 Base URL 或目标模型，未探测", False)
 
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    responses_mode = (upstream_format or "") == "responses"
+    endpoint = "/responses" if responses_mode else "/chat/completions"
+
+    deadline = time.monotonic() + timeout
+
+    class _BudgetExhausted(Exception):
+        pass
+
+    def _remaining() -> float:
+        return deadline - time.monotonic()
+
+    def _wire_body(body: dict) -> dict:
+        if not responses_mode:
+            return body
+        from cc_convert.upstream_responses import chat_body_to_responses_body
+
+        return chat_body_to_responses_body(body)
+
     async def _post(body: dict):
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            return await client.post(
-                f"{base}/chat/completions", headers=headers, json=body
+        remaining = _remaining()
+        if remaining <= 0.2:
+            raise _BudgetExhausted()
+        # A dead host should fail fast; a slow model still gets the budget.
+        client_timeout = httpx.Timeout(remaining, connect=min(10.0, remaining))
+        wire_body = _wire_body(body)
+
+        async def _send():
+            async with httpx.AsyncClient(
+                timeout=client_timeout, trust_env=False
+            ) as client:
+                return await client.post(
+                    f"{base}{endpoint}", headers=headers, json=wire_body
+                )
+
+        return await asyncio.wait_for(_send(), timeout=remaining)
+
+    def _unreachable(exc: BaseException) -> dict:
+        timed_out = isinstance(
+            exc, (httpx.TimeoutException, asyncio.TimeoutError, _BudgetExhausted)
+        )
+        if timed_out:
+            return _probe_result(
+                "turn",
+                f"上游 {timeout:g} 秒内没有响应，未改动当前设置",
+                False,
             )
+        return _probe_result(
+            "turn",
+            f"无法连接上游（{type(exc).__name__}），未改动当前设置",
+            False,
+        )
 
     # Probe 1: does the provider reject reasoning_content outright?
     body_with_reasoning = {
@@ -357,25 +456,6 @@ async def probe_upstream(
             {"role": "user", "content": "x"},
         ],
     }
-    try:
-        first = await _post(body_with_reasoning)
-    except Exception as exc:
-        return {
-            "policy": "turn",
-            "evidence": f"无法连接上游（{type(exc).__name__}），保持默认 turn",
-        }
-
-    if first.status_code == 400:
-        text = (first.text or "").lower()
-        if "reasoning" in text or "thinking" in text:
-            if any(hint in text for hint in _FORBIDDEN_HINTS) or not any(
-                hint in text for hint in _REQUIRED_HINTS
-            ):
-                return {
-                    "policy": "drop",
-                    "evidence": "上游拒绝回传 reasoning_content → drop",
-                }
-
     # Probe 2: does a tool-call message require reasoning_content?
     body_tool_without_reasoning = {
         "model": model,
@@ -406,23 +486,82 @@ async def probe_upstream(
             }
         ],
     }
-    try:
-        second = await _post(body_tool_without_reasoning)
-    except Exception as exc:
-        return {
-            "policy": "turn",
-            "evidence": f"工具轮探测失败（{type(exc).__name__}），保持默认 turn",
-        }
+    # The two probes are independent, so run them at the same time. Doing them
+    # one after another doubles the wall time, and with a hard 20 s budget that
+    # alone is enough to turn a healthy-but-slow relay into "no response".
+    first, second = await asyncio.gather(
+        _post(body_with_reasoning),
+        _post(body_tool_without_reasoning),
+        return_exceptions=True,
+    )
 
-    if second.status_code == 400:
+    def _status(result: Any) -> int | None:
+        return None if isinstance(result, BaseException) else result.status_code
+
+    status_first, status_second = _status(first), _status(second)
+
+    if 401 in (status_first, status_second) or 403 in (
+        status_first,
+        status_second,
+    ):
+        code = 401 if 401 in (status_first, status_second) else 403
+        failed = first if status_first in (401, 403) else second
+        # Surface the upstream's own words: 403 is often not a bad key but an
+        # overdue balance, and the snippet says so.
+        snippet = " ".join((getattr(failed, "text", "") or "").split())[:160]
+        lowered = snippet.lower()
+        auth_like = any(
+            word in lowered
+            for word in ("api key", "apikey", "invalid", "unauthorized", "auth")
+        )
+        if auth_like or not snippet:
+            evidence = f"上游鉴权失败（HTTP {code}），请检查 API Key"
+        else:
+            # 403 is often not a bad key but an overdue balance / quota.
+            evidence = f"上游拒绝请求（HTTP {code}）"
+        if snippet:
+            evidence += f"：{snippet}"
+        return _probe_result("turn", evidence, False)
+
+    # Signal 1: the provider rejects reasoning_content outright.
+    if status_first == 400:
+        text = (first.text or "").lower()
+        if "reasoning" in text or "thinking" in text:
+            if any(hint in text for hint in _FORBIDDEN_HINTS) or not any(
+                hint in text for hint in _REQUIRED_HINTS
+            ):
+                return _probe_result(
+                    "drop",
+                    "上游拒绝回传 reasoning_content → 全部丢弃（drop）",
+                    True,
+                )
+
+    # Signal 2: the tool loop demands reasoning_content.
+    if status_second == 400:
         text = (second.text or "").lower()
         if any(hint in text for hint in _REQUIRED_HINTS):
-            return {
-                "policy": "turn",
-                "evidence": "工具调用轮要求回传 reasoning_content → turn",
-            }
+            return _probe_result(
+                "turn",
+                "工具调用轮要求回传 reasoning_content → 仅当前轮（turn）",
+                True,
+            )
 
-    return {"policy": "turn", "evidence": "未收到明确信号，采用默认 turn"}
+    if status_first is None or status_second is None:
+        failed = first if status_first is None else second
+        return _unreachable(failed)  # type: ignore[arg-type]
+
+    status = f"{status_first}/{status_second}"
+    if status_first == 404 and status_second == 404:
+        return _probe_result(
+            "turn",
+            f"上游没有 {endpoint} 接口（HTTP {status}），请检查 Base URL 与上游协议",
+            False,
+        )
+    return _probe_result(
+        "turn",
+        f"上游未给出明确信号（HTTP {status}），保持当前设置",
+        False,
+    )
 
 
 def reset_learned() -> None:

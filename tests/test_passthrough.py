@@ -176,7 +176,7 @@ class TestOpenAIChatCompletionsPassthrough:
         assert mock_post["headers"]["Authorization"] == "Bearer test-key"
 
     def test_streaming_passthrough_happy_path(self, client):
-        async def mock_stream_proxy(client_arg, url, headers, body_json):
+        async def mock_stream_proxy(client_arg, url, headers, body_json, **kwargs):
             yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-4","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}\n\n'
             yield 'data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n'
             yield "data: [DONE]\n\n"
@@ -193,7 +193,7 @@ class TestOpenAIChatCompletionsPassthrough:
         assert "[DONE]" in content
 
     def test_streaming_passthrough_error(self, client):
-        async def mock_stream_proxy_error(client_arg, url, headers, body_json):
+        async def mock_stream_proxy_error(client_arg, url, headers, body_json, **kwargs):
             yield 'data: {"error": {"message": "Upstream error (500)", "type": "api_error"}}\n\n'
             yield "data: [DONE]\n\n"
 

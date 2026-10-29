@@ -336,7 +336,15 @@ class TestRestartDaemon:
                 with patch.object(daemon, "start_daemon", return_value=True) as mock_start:
                     result = daemon.restart_daemon()
                     assert result is True
-                    mock_start.assert_called_once_with()
+                    mock_start.assert_called_once_with(None)
+
+    def test_restart_forwards_the_port_override(self):
+        """`ccconvert restart --port N` must reach start_daemon."""
+        with patch.object(daemon, "stop_daemon", return_value=True):
+            with patch("time.sleep"):
+                with patch.object(daemon, "start_daemon", return_value=True) as mock_start:
+                    daemon.restart_daemon(port=18888)
+                    mock_start.assert_called_once_with(18888)
 
 
 class TestShowLogs:

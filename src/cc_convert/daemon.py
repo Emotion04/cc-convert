@@ -136,13 +136,16 @@ def _is_process_running(pid: int) -> bool:
 
 
 def _force_kill(pid: int) -> None:
-    """Forcefully terminate *pid*.
+    """Forcefully terminate *pid* **and its process tree**.
 
-    Windows has no SIGKILL, so it shells out to ``taskkill /F`` there.
+    Windows has no SIGKILL, so it shells out to ``taskkill /F`` there. ``/T``
+    matters: workers are children of the manager, and without it ``ccconvert
+    stop -f`` / ``restart`` leaves them running, holding their ports so the
+    next start fails with WinError 10048.
     """
     if sys.platform == "win32":
         subprocess.run(
-            ["taskkill", "/F", "/PID", str(pid)],
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
             capture_output=True,
             timeout=10,
         )
@@ -169,7 +172,11 @@ def _find_pid_by_port(port: int) -> Optional[int]:
     try:
         if sys.platform == "win32":
             result = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True, timeout=5
+                ["netstat", "-ano"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=5,
             )
             for line in result.stdout.splitlines():
                 parts = line.split()
@@ -187,6 +194,7 @@ def _find_pid_by_port(port: int) -> Optional[int]:
                 ["lsof", "-t", "-i", f":{port}"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=5,
             )
             if result.returncode == 0 and result.stdout.strip():
@@ -480,16 +488,19 @@ def stop_daemon(force: bool = False) -> bool:
         return False
 
 
-def restart_daemon() -> bool:
+def restart_daemon(port: int | None = None) -> bool:
     """
     Restart the manager daemon (stop + start).
+
+    ``port`` overrides the stored manager port for the new process, matching
+    ``ccconvert restart --port N``.
     """
     print("Restarting manager...")
     # Use force=True to ensure the old process is killed even if it's stuck
     stop_daemon(force=True)
     # Longer delay to ensure port is fully released
     time.sleep(1)
-    return start_daemon()
+    return start_daemon(port)
 
 
 def show_logs(follow: bool = False, lines: int = 50) -> bool:

@@ -352,14 +352,17 @@ def convert_anthropic_to_openai(
     # never sees an unfilled tool_calls message.
     _ensure_tool_results_for_tool_calls(openai_messages)
 
-    # Build OpenAI params
+    # Build OpenAI params.
+    # ``repetition_penalty`` is only sent when the client actually set it:
+    # strict upstreams reject the key even when its value is null.
     params: dict[str, Any] = {
         "model": model,
         "messages": openai_messages,
         "max_tokens": max_tokens,
         "stream": stream,
-        "repetition_penalty": repetition_penalty,
     }
+    if repetition_penalty is not None:
+        params["repetition_penalty"] = repetition_penalty
 
     # Always include usage in stream for accurate token counting
     if stream:
@@ -385,6 +388,18 @@ def convert_anthropic_to_openai(
 
             # Skip server tools - they are handled separately
             if tool_type in server_tool_types:
+                continue
+
+            # A tool without a name is not a function tool. This happens when a
+            # client sends an Anthropic server tool (web_search …) while no
+            # search provider is configured: forwarding it would send
+            # ``function.name == ""`` and make strict upstreams reject the whole
+            # request.
+            if not tool_def.get("name"):
+                logger.debug(
+                    "Dropping tool without a name (type=%s); no handler is configured",
+                    tool_type,
+                )
                 continue
 
             openai_tool: ChatCompletionToolParam = {

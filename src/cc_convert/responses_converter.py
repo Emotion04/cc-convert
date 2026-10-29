@@ -24,6 +24,9 @@ import json
 import logging
 import time
 
+# Shared with the Anthropic path: one implementation, so the two directions
+# cannot drift apart. converter.py does not import this module, so no cycle.
+from cc_convert.converter import _ensure_tool_results_for_tool_calls
 from cc_convert.utils.tokens import extract_cache_read_tokens
 from typing import Any, AsyncIterable
 
@@ -320,72 +323,9 @@ def _input_item_to_openai_messages(
     return []
 
 
-_ORPHAN_TOOL_RESULT_PLACEHOLDER = (
-    "[ERROR: tool result for this call was not provided by the client; "
-    "output is unknown. Do not fabricate; ask the user or re-issue the "
-    "tool call if needed.]"
-)
-
-
-def _ensure_tool_results_for_tool_calls(
-    openai_messages: list[dict[str, Any]],
-) -> None:
-    """Backfill placeholder ``tool`` messages for any orphaned tool_call_id.
-
-    Mutates ``openai_messages`` in place. vLLM/SGLang reject an assistant
-    message carrying ``tool_calls`` if no later ``tool`` message answers each
-    ``tool_call_id``. When the client only sent the call (or truncated history),
-    insert a neutral placeholder tool message right after the assistant message.
-    """
-    if not openai_messages:
-        return
-
-    answered_ids: set[str] = set()
-    for msg in openai_messages:
-        if msg.get("role") == "tool":
-            tid = msg.get("tool_call_id")
-            if tid:
-                answered_ids.add(tid)
-
-    insertions: list[tuple[int, dict[str, Any]]] = []
-    for idx, msg in enumerate(openai_messages):
-        if msg.get("role") != "assistant":
-            continue
-        tool_calls = msg.get("tool_calls")
-        if not tool_calls:
-            continue
-        missing: list[str] = []
-        for tc in tool_calls:
-            tc_id = tc.get("id") if isinstance(tc, dict) else None
-            if tc_id and tc_id not in answered_ids:
-                missing.append(tc_id)
-        if not missing:
-            continue
-        offset = 1
-        for tid in missing:
-            insertions.append(
-                (
-                    idx + offset,
-                    {
-                        "role": "tool",
-                        "tool_call_id": tid,
-                        "content": _ORPHAN_TOOL_RESULT_PLACEHOLDER,
-                    },
-                )
-            )
-            offset += 1
-            answered_ids.add(tid)
-
-    if not insertions:
-        return
-
-    for pos, tool_msg in sorted(insertions, key=lambda x: x[0], reverse=True):
-        openai_messages.insert(pos, tool_msg)
-    logger.debug(
-        "Backfilled %d placeholder tool result(s) for orphaned tool_call_id(s)",
-        len(insertions),
-    )
-
+# ``_ensure_tool_results_for_tool_calls`` is imported from converter.py — see
+# the import at the top of this module. Keeping a second copy here caused the
+# two directions to drift apart.
 
 def _content_to_openai_message(role: str, content: Any) -> dict[str, Any]:
     """Build a single chat message from a Responses message content value."""

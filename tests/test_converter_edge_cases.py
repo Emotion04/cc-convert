@@ -84,7 +84,12 @@ class TestConvertAnthropicToOpenAIEdgeCases:
         assert result["repetition_penalty"] == 1.5
 
     def test_default_repetition_penalty(self):
-        """Test default repetition_penalty value (None when not specified)."""
+        """The key is omitted when the client did not set it.
+
+        Sending ``"repetition_penalty": null`` made strict upstreams reject the
+        whole request (see docs/不变量与陷阱.md I7), so the converter leaves the
+        field out entirely instead of forwarding a null.
+        """
         params: MessageCreateParams = {
             "model": "gpt-4o",
             "max_tokens": 1024,
@@ -93,8 +98,7 @@ class TestConvertAnthropicToOpenAIEdgeCases:
 
         result = convert_anthropic_to_openai(params)
 
-        # repetition_penalty is None when not explicitly specified
-        assert result["repetition_penalty"] is None
+        assert "repetition_penalty" not in result
 
 
 class TestConvertAnthropicMessageEdgeCases:

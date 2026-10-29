@@ -4,7 +4,7 @@
 import json
 import logging
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Callable, Optional
 
 import httpx
 from fastapi.responses import JSONResponse
@@ -85,8 +85,16 @@ async def _handle_with_server_tools(
     settings: Settings,
     server_tools: list[type],
     model: str,
+    *,
+    request_transform: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
+    response_transform: Optional[Callable[[Any], Any]] = None,
 ) -> JSONResponse:
-    """Handle request with server tool execution loop."""
+    """Handle request with server tool execution loop.
+
+    ``request_transform`` / ``response_transform`` adapt the loop to an upstream
+    that speaks a different wire format (the Responses API); the loop itself
+    keeps working on the chat shape.
+    """
     params = dict(openai_params)
     configs = params.pop("_server_tools_config", {})
 
@@ -110,7 +118,10 @@ async def _handle_with_server_tools(
                     f"Request body: {json.dumps(params, indent=2, default=str)[:3000]}"
                 )
 
-                response = await client.post(url, headers=headers, json=params)
+                request_body = (
+                    request_transform(params) if request_transform else params
+                )
+                response = await client.post(url, headers=headers, json=request_body)
 
                 if response.status_code != 200:
                     logger.error(
@@ -140,6 +151,8 @@ async def _handle_with_server_tools(
                     )
 
                 completion_data = response.json()
+                if response_transform:
+                    completion_data = response_transform(completion_data)
                 logger.debug(
                     f"OpenAI response: {json.dumps(completion_data, indent=2)[:500]}..."
                 )

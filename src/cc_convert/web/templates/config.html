@@ -94,6 +94,12 @@
                         <span x-show="formatStatus === 'ok'" x-text="'已检测到: ' + (formData.detected_format === 'chat_completions' ? 'Chat Completions' : 'Responses')"></span>
                         <span x-show="formatStatus === 'fail'" class="text-amber-600">探测失败，已默认 Chat Completions</span>
                     </p>
+                    <p x-show="formData.upstream_format === 'responses'" x-cloak
+                       class="text-xs mt-1.5 text-stone-500 leading-relaxed">
+                        上游为 Responses 时，代理会把 Claude Code 的请求体自动转换为 Responses 格式（含工具调用与推理项），
+                        响应再转回 Anthropic。两种协议都能用；该中转的缓存统计不稳定（同一请求时而命中、时而报 0），
+                        不要据此判断优劣，按上游实际支持的能力选择即可。
+                    </p>
                 </div>
 
                 <!-- Thinking history replay policy -->
@@ -107,12 +113,12 @@
                     <div class="flex gap-2">
                         <select x-model="formData.thinking_history"
                                 class="input-field flex-1 px-4 py-2.5 rounded-xl text-sm text-stone-800">
-                            <option value="auto">智能（推荐）：内置规则 + 从上游 400 学习</option>
-                            <option value="upstream">遵循上游：启动时实时探测（多 1~2 次极小请求）</option>
-                            <option value="rules">严格按内置规则（不学习、不纠正）</option>
-                            <option value="turn">仅当前轮（含整条工具调用链）</option>
-                            <option value="keep">全部回传</option>
-                            <option value="drop">全部丢弃</option>
+                            <option value="auto">智能（auto，推荐）：内置规则 + 从上游 400 学习</option>
+                            <option value="upstream">遵循上游（upstream）：启动时实时探测，多 1~2 次极小请求</option>
+                            <option value="rules">严格规则（rules）：不学习、不纠正</option>
+                            <option value="turn">仅当前轮（turn）：含整条工具调用链</option>
+                            <option value="keep">全部回传（keep）</option>
+                            <option value="drop">全部丢弃（drop）</option>
                         </select>
                         <button type="button" @click="probeThinking()"
                                 :disabled="thinkingProbe.status === 'probing'"
@@ -120,8 +126,12 @@
                             <span x-text="thinkingProbe.status === 'probing' ? '探测中…' : '探测上游策略'"></span>
                         </button>
                     </div>
-                    <p x-show="thinkingProbe.status === 'done'" class="text-xs mt-1.5 text-teal-600"
-                       x-text="'建议：' + thinkingProbe.policy + ' — ' + thinkingProbe.evidence + (thinkingProbe.applied ? '（已应用，下一次请求生效）' : '')"></p>
+                    <p x-show="thinkingProbe.status === 'probing'" x-cloak
+                       class="text-xs mt-1.5 text-stone-500"
+                       x-text="`探测中… 已用 ${(thinkingProbe.elapsed || 0).toFixed(1)}s / 20s，剩余 ${(thinkingProbe.remaining || 0).toFixed(1)}s`"></p>
+                    <p x-show="thinkingProbe.status === 'done'" class="text-xs mt-1.5"
+                       :class="thinkingProbe.ok ? 'text-teal-600' : 'text-amber-600'"
+                       x-text="(thinkingProbe.ok ? '建议：' + thinkingProbe.label : '未得出结论') + (thinkingProbe.evidence ? ' — ' + thinkingProbe.evidence : '') + (thinkingProbe.applied ? '（已应用，下一次请求生效）' : '')"></p>
                     <p x-show="thinkingProbe.status === 'fail'" class="text-xs mt-1.5 text-amber-600"
                        x-text="thinkingProbe.evidence"></p>
                     <p class="text-xs text-stone-400 mt-1.5">
@@ -142,7 +152,7 @@
                          class="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
                         <p class="text-xs leading-relaxed text-amber-700">
                             该实例曾被自动纠正为
-                            <span class="font-mono" x-text="thinkingCorrectedTo"></span>。
+                            <span class="font-semibold" x-text="thinkingCorrectedTo"></span>。
                             修改 URL / 目标模型 / 协议后会自动失效并重新判断。
                         </p>
                     </div>
@@ -291,17 +301,17 @@
                         class="text-stone-400 hover:text-stone-600 text-2xl leading-none cursor-pointer">&times;</button>
             </div>
             <p class="text-xs leading-relaxed text-stone-500 mb-4">
-                <strong>智能</strong>：使用下方整理的内置规则，并在收到推理相关的 400 时自动纠正后续请求。<br>
-                <strong>遵循上游</strong>：Worker 启动时真实探测上游（1~2 次极小请求），探测失败则回退到内置规则。<br>
-                <strong>严格按内置规则</strong>：不探测、不学习、不纠正。<br>
-                <code class="font-mono">turn</code> 表示只回传「当前轮」的推理：最后一次用户输入之后的全部 assistant 消息（含多步工具调用），更早轮次丢弃。
+                <strong>智能（auto）</strong>：使用下方整理的内置规则，并在收到推理相关的 400 时自动纠正后续请求。<br>
+                <strong>遵循上游（upstream）</strong>：Worker 启动时真实探测上游（1~2 次极小请求），探测失败则回退到内置规则。<br>
+                <strong>严格规则（rules）</strong>：不探测、不学习、不纠正。<br>
+                <strong>仅当前轮（turn）</strong> 表示只回传「当前轮」的推理：最后一次用户输入之后的全部 assistant 消息（含多步工具调用），更早轮次丢弃。
             </p>
             <div class="space-y-3">
                 {% for note in provider_notes %}
                 <div class="rounded-xl border border-stone-100 p-3">
                     <div class="flex items-center justify-between gap-3">
                         <span class="text-sm font-semibold text-stone-800">{{ note.provider }}</span>
-                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 font-mono">{{ note.policy }}</span>
+                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600">{{ note.label }}</span>
                     </div>
                     <p class="text-xs text-stone-500 mt-1 leading-relaxed">{{ note.summary }}</p>
                     <a href="{{ note.source }}" target="_blank" rel="noopener"
@@ -337,7 +347,7 @@ function instanceConfig() {
             thinking_history_force_manual: false,
             detected_format: '',
         },
-        thinkingProbe: { status: 'idle', policy: '', evidence: '' },
+        thinkingProbe: { status: 'idle', ok: false, policy: '', label: '', evidence: '', applied: false },
         availableModels: [],
         modelsLoading: false,
         thinkingCorrected: false,
@@ -395,7 +405,8 @@ function instanceConfig() {
                     detected_format: '',
                 };
                 this.thinkingCorrected = !!data.thinking_history_corrected;
-                this.thinkingCorrectedTo = data.thinking_history_effective || '';
+                this.thinkingCorrectedTo = data.thinking_history_effective_label
+                    || data.thinking_history_effective || '';
                 // The instance response masks the key; fetch the real one so the
                 // form shows what is actually configured (the eye reveals it).
                 try {
@@ -500,7 +511,35 @@ function instanceConfig() {
 
         async probeThinking() {
             if (this.thinkingProbe.status === 'probing') return;
-            this.thinkingProbe = { status: 'probing', policy: '', evidence: '', applied: false };
+
+            // The server enforces the same 20 s budget, so the countdown here is
+            // not cosmetic: when it reaches zero the request is about to end.
+            const BUDGET = 20;
+            const WARN_AT = 5;
+            const startedAt = Date.now();
+            let warned = false;
+            const timer = setInterval(() => {
+                const elapsed = (Date.now() - startedAt) / 1000;
+                this.thinkingProbe.elapsed = elapsed;
+                this.thinkingProbe.remaining = Math.max(0, BUDGET - elapsed);
+                if (!warned && elapsed >= WARN_AT) {
+                    warned = true;
+                    showToast(
+                        `上游响应较慢（已 ${WARN_AT} 秒），继续等待，最长 ${BUDGET} 秒`,
+                        'warning'
+                    );
+                }
+            }, 200);
+
+            const controller = new AbortController();
+            // A little past the server budget: the server answers first with a
+            // clear "no response" result, this only guards a dead connection.
+            const abortTimer = setTimeout(() => controller.abort(), (BUDGET + 5) * 1000);
+
+            this.thinkingProbe = {
+                status: 'probing', ok: false, policy: '', label: '', evidence: '',
+                applied: false, elapsed: 0, remaining: BUDGET,
+            };
             try {
                 const r = await fetch('/api/probe-thinking', {
                     method: 'POST',
@@ -508,6 +547,7 @@ function instanceConfig() {
                         'Content-Type': 'application/json',
                         'X-CCCONVERT-CSRF': getCsrfToken(),
                     },
+                    signal: controller.signal,
                     body: JSON.stringify({
                         url: (this.formData.upstream_base_url || '').trim(),
                         key: (this.formData.upstream_api_key || '').trim(),
@@ -536,17 +576,27 @@ function instanceConfig() {
                 }
                 this.thinkingProbe = {
                     status: 'done',
+                    ok: !!data.ok,
                     policy: data.policy || '',
+                    label: data.label || data.policy || '',
                     evidence: data.evidence || '',
                     applied: !!data.applied,
                 };
-                if (data.policy) this.formData.thinking_history = data.policy;
+                // Only a definite answer may change the form: an unreachable or
+                // inconclusive upstream must leave the user's choice untouched.
+                if (data.ok && data.policy) this.formData.thinking_history = data.policy;
             } catch (e) {
+                const aborted = e && e.name === 'AbortError';
                 this.thinkingProbe = {
                     status: 'fail',
                     policy: '',
-                    evidence: '探测失败: ' + e.message,
+                    evidence: aborted
+                        ? `探测超时（${BUDGET} 秒内没有返回）`
+                        : '探测失败: ' + e.message,
                 };
+            } finally {
+                clearInterval(timer);
+                clearTimeout(abortTimer);
             }
         },
 

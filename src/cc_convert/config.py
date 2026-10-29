@@ -264,6 +264,25 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        """Accept values from the config file (init kwargs) only.
+
+        ``BaseSettings`` reads a matching environment variable for every field
+        by default (``PORT``, ``OPENAI_API_KEY``, …), which silently overrode
+        values the user put in ``config.toml`` and contradicted the documented
+        "environment variables are ignored". Keeping only ``init`` makes the
+        config file the single source of truth.
+        """
+        return (init_settings,)
+
     # OpenAI API Configuration
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
     openai_base_url: str = Field(default="https://api.openai.com/v1", description="OpenAI base URL")

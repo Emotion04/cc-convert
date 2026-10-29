@@ -378,7 +378,7 @@ class TestProbe:
         return result, client
 
     def test_rejects_reasoning_means_drop(self):
-        result, _ = self._run([(400, "reasoning_content is not allowed")])
+        result, _ = self._run([(400, "reasoning_content is not allowed"), (200, "ok")])
         assert result["policy"] == "drop"
 
     def test_tool_loop_requires_reasoning_means_turn(self):
@@ -395,7 +395,7 @@ class TestProbe:
     def test_connection_error_defaults_to_turn(self):
         import httpx
 
-        result, _ = self._run([httpx.ConnectError("")])
+        result, _ = self._run([httpx.ConnectError(""), httpx.ConnectError("")])
         assert result["policy"] == "turn"
         assert "无法连接" in result["evidence"]
 
@@ -409,4 +409,179 @@ class TestProbe:
                 tp.probe_upstream("https://api.example.com/v1", "k", "")
             )
         assert result["policy"] == "turn"
+        assert result["ok"] is False
         assert client.calls == []
+
+    def test_definitive_signal_is_ok(self):
+        result, _ = self._run([(400, "reasoning_content is not allowed"), (200, "ok")])
+        assert result["ok"] is True
+
+    def test_inconclusive_probe_is_not_ok(self):
+        # A 200/200 upstream tells us nothing, so nothing may be persisted.
+        result, _ = self._run([(200, "ok"), (200, "ok")])
+        assert result["ok"] is False
+        assert "HTTP 200/200" in result["evidence"]
+
+    def test_timeout_names_the_budget(self):
+        import httpx
+
+        result, _ = self._run([httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")])
+        assert result["ok"] is False
+        assert "20 秒内没有响应" in result["evidence"]
+        assert "未改动当前设置" in result["evidence"]
+
+    def test_deadline_is_shared_by_both_probes(self):
+        """The budget covers the whole probe, not each request."""
+        import asyncio
+        import time
+        from unittest.mock import patch
+
+        from cc_convert import thinking_policy as tp
+
+        class Slow:
+            def __init__(self):
+                self.calls = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url, headers=None, json=None):
+                # Always inconclusive and slow enough to eat the budget.
+                self.calls += 1
+                await asyncio.sleep(0.4)
+                from types import SimpleNamespace
+
+                return SimpleNamespace(status_code=200, text="ok")
+
+        client = Slow()
+        started = time.monotonic()
+        with patch("httpx.AsyncClient", return_value=client):
+            result = asyncio.run(
+                tp.probe_upstream(
+                    "https://api.example.com/v1", "k", "m", timeout=0.5
+                )
+            )
+        assert result["ok"] is False
+        assert time.monotonic() - started < 1.5
+        assert client.calls <= 2
+
+    def test_responses_upstream_probes_the_responses_endpoint(self):
+        import asyncio
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from cc_convert import thinking_policy as tp
+
+        posted = []
+
+        class Fake:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url, headers=None, json=None):
+                posted.append((url, json))
+                return SimpleNamespace(status_code=200, text="ok")
+
+        with patch("httpx.AsyncClient", return_value=Fake()):
+            asyncio.run(
+                tp.probe_upstream(
+                    "https://api.example.com/v1",
+                    "k",
+                    "m",
+                    upstream_format="responses",
+                )
+            )
+
+        assert posted[0][0].endswith("/responses")
+        assert "input" in posted[0][1]
+        assert "messages" not in posted[0][1]
+
+    def test_auth_failure_is_reported(self):
+        result, client = self._run(
+            [(401, '{"error":"Invalid API key"}'), (401, '{"error":"Invalid API key"}')]
+        )
+        assert result["ok"] is False
+        assert "鉴权" in result["evidence"]
+        assert "Invalid API key" in result["evidence"]
+        assert len(client.calls) == 2
+
+    def test_forbidden_for_other_reasons_quotes_the_upstream(self):
+        # A 403 is often an overdue balance, not a bad key — say so.
+        body = '{"error":{"code":"AccountOverdueError"}}'
+        result, _ = self._run([(403, body), (403, body)])
+        assert result["ok"] is False
+        assert "鉴权" not in result["evidence"]
+        assert "AccountOverdueError" in result["evidence"]
+
+    def test_evidence_uses_labels_not_bare_keys(self):
+        result, _ = self._run(
+            [(200, "ok"), (400, "reasoning_content must be passed back")]
+        )
+        assert result["label"] == "仅当前轮（turn）"
+        assert "仅当前轮（turn）" in result["evidence"]
+
+
+class TestProbeApply:
+    """The dashboard must never persist a probe that reached no conclusion."""
+
+    @staticmethod
+    def _apply(monkeypatch, result, apply=True):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from cc_convert.web import routes
+
+        saved: list[dict] = []
+        monkeypatch.setattr(
+            "cc_convert.thinking_policy.probe_upstream",
+            AsyncMock(return_value=result),
+        )
+        monkeypatch.setattr(
+            "cc_convert.thinking_policy.save_correction_for",
+            lambda **kw: saved.append(kw),
+        )
+
+        class Req:
+            async def json(self):
+                return {
+                    "url": "https://api.example.com/v1",
+                    "key": "sk-x",
+                    "model": "m",
+                    "instance_id": "inst_1",
+                    "apply": apply,
+                }
+
+        asyncio.run(routes.probe_thinking(Req()))
+        return saved
+
+    def test_failed_probe_is_not_persisted(self, monkeypatch):
+        saved = self._apply(
+            monkeypatch,
+            {"policy": "turn", "label": "", "evidence": "超时", "ok": False},
+        )
+        assert saved == []
+
+    def test_definitive_probe_is_persisted(self, monkeypatch):
+        saved = self._apply(
+            monkeypatch,
+            {"policy": "drop", "label": "", "evidence": "拒绝", "ok": True},
+        )
+        assert len(saved) == 1
+        assert saved[0]["policy"] == "drop"
+
+
+def test_policy_labels_cover_every_mode():
+    from cc_convert.thinking_policy import MODES, POLICY_LABELS, policy_label
+
+    assert set(POLICY_LABELS) == set(MODES)
+    for mode in MODES:
+        label = policy_label(mode)
+        assert label.endswith(f"（{mode}）"), label
+    assert policy_label("") == ""
+    assert policy_label("mystery") == "mystery"
