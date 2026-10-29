@@ -88,12 +88,17 @@ async def _handle_with_server_tools(
     *,
     request_transform: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
     response_transform: Optional[Callable[[Any], Any]] = None,
+    usage_recorder=None,
 ) -> JSONResponse:
     """Handle request with server tool execution loop.
 
     ``request_transform`` / ``response_transform`` adapt the loop to an upstream
     that speaks a different wire format (the Responses API); the loop itself
     keeps working on the chat shape.
+
+    ``usage_recorder`` receives one ``upstream()`` call per loop iteration —
+    one client request can hit the upstream N times, and each upstream call
+    is billed separately.
     """
     params = dict(openai_params)
     configs = params.pop("_server_tools_config", {})
@@ -159,6 +164,12 @@ async def _handle_with_server_tools(
                 from openai.types.chat import ChatCompletion
 
                 completion = ChatCompletion.model_validate(completion_data)
+
+                if usage_recorder is not None and completion.usage is not None:
+                    try:
+                        usage_recorder.upstream(completion.usage.model_dump())
+                    except Exception:  # accounting must not break the loop
+                        logger.warning("Usage recording failed", exc_info=True)
 
                 # Check for server tool calls
                 server_tool_calls = []

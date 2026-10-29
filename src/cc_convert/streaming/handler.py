@@ -54,6 +54,7 @@ async def _stream_response(
     *,
     upstream_body: dict | None = None,
     responses_upstream: bool = False,
+    usage_recorder=None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream response from OpenAI and convert to Anthropic format.
@@ -62,13 +63,19 @@ async def _stream_response(
     token estimation. ``upstream_body`` is what actually gets posted; when the
     upstream speaks the Responses API it is the translated body, and the SSE
     stream is translated back to chat chunks before parsing.
+
+    ``usage_recorder`` collects the final usage into the token ledger; the
+    generator records exactly once in its ``finally`` (also on client
+    disconnects), with ``unreported`` when the upstream never sent usage.
     """
     body = upstream_body if upstream_body is not None else json_data
+    stream_errored = False
     try:
         async with client.stream(
             "POST", url, headers=headers, json=body
         ) as response:
             if response.status_code != 200:
+                stream_errored = True
                 error_body = await response.aread()
                 error_text = error_body.decode("utf-8", errors="replace").strip()
                 # In "follow upstream" mode, remember a reasoning-shape 400 so
@@ -168,6 +175,8 @@ async def _stream_response(
                         cache_read_input_tokens = cr_init
                     if cc_init is not None:
                         cache_creation_input_tokens = cc_init
+                    if usage_recorder and usage:
+                        usage_recorder.latest(usage)
 
                     start_event = {
                         "type": "message_start",
@@ -202,6 +211,8 @@ async def _stream_response(
                 if not chunk.get("choices"):
                     usage = chunk.get("usage") or {}
                     if usage:
+                        if usage_recorder:
+                            usage_recorder.latest(usage)
                         input_tokens = usage.get("prompt_tokens", input_tokens)
                         output_tokens = usage.get("completion_tokens", output_tokens)
                         cr, cc = _extract_cache_tokens(usage)
@@ -412,6 +423,7 @@ async def _stream_response(
             yield f"event: message_stop\ndata: {json.dumps(stop_event)}\n\n"
 
     except httpx.RequestError as e:
+        stream_errored = True
         # str(ConnectError) is empty, which used to leave the client with a
         # blank error and the log with a bare "Stream error: ". Report the
         # exception type and host so the failure is actually diagnosable.
@@ -432,6 +444,7 @@ async def _stream_response(
         )
         yield f"event: error\ndata: {error_event.model_dump_json()}\n\n"
     except Exception as e:
+        stream_errored = True
         import traceback
 
         error_msg = f"{str(e)}\n{traceback.format_exc()}"
@@ -440,6 +453,9 @@ async def _stream_response(
             error=AnthropicError(type="internal_error", message=str(e))
         )
         yield f"event: error\ndata: {error_event.model_dump_json()}\n\n"
+    finally:
+        if usage_recorder:
+            usage_recorder.finish(errors=1 if stream_errored else 0)
 
 
 async def _convert_result_to_stream(

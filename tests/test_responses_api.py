@@ -755,7 +755,7 @@ class TestResponsesRoute:
         assert "error" in response.json()
 
     def test_streaming_response(self, client):
-        async def mock_stream_responses(client_arg, url, headers, chat_params, model, instructions):
+        async def mock_stream_responses(client_arg, url, headers, chat_params, model, instructions, usage_recorder=None):
             yield "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"r\",\"object\":\"response\",\"created_at\":0,\"model\":\"gpt-4o\",\"status\":\"in_progress\",\"output\":[],\"parallel_tool_calls\":true,\"tool_choice\":\"auto\",\"tools\":[],\"text\":{\"format\":{\"type\":\"text\"}}}}\n\n"
             yield "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"m\",\"output_index\":0,\"delta\":\"Hi\"}\n\n"
             yield "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"object\":\"response\",\"created_at\":0,\"model\":\"gpt-4o\",\"status\":\"completed\",\"output\":[],\"parallel_tool_calls\":true,\"tool_choice\":\"auto\",\"tools\":[],\"text\":{\"format\":{\"type\":\"text\"}}}}\n\n"

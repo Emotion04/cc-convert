@@ -172,6 +172,23 @@ def _is_responses_upstream(settings: Settings) -> bool:
     return fmt == "responses"
 
 
+def _start_usage(request: Request, endpoint: str, model: str, client_model: str):
+    """Create a usage recorder for one client request, or ``None``.
+
+    Returns ``None`` (instead of raising) when no collector is installed —
+    accounting must never break proxying. All recorder methods swallow their
+    own errors too, so callers may use the recorder unconditionally.
+    """
+    try:
+        state = getattr(getattr(request, "app", None), "state", None)
+        collector = getattr(state, "usage", None)
+        if collector is None:
+            return None
+        return collector.recorder(endpoint, model, client_model)
+    except Exception:
+        return None
+
+
 def _upstream_url(settings: Settings, endpoint: str) -> str:
     """Build the upstream URL for a given endpoint, respecting upstream_format.
 
@@ -323,6 +340,8 @@ async def create_message(
         logger.debug("Model name mapped: %s -> %s", original_model, resolved_model)
         anthropic_params["model"] = resolved_model
 
+    usage_recorder = _start_usage(request, "/v1/messages", resolved_model, original_model)
+
     messages_value = anthropic_params.get("messages")
     if not isinstance(messages_value, list) or len(messages_value) == 0:
         error_response = AnthropicErrorResponse(
@@ -453,7 +472,12 @@ async def create_message(
                 chat_body_to_responses_body if responses_upstream else None
             ),
             response_transform=_to_chat if responses_upstream else None,
+            usage_recorder=usage_recorder,
         )
+        # One client request even though the loop may have hit the upstream
+        # several times; per-iteration tokens were recorded inside the loop.
+        if usage_recorder:
+            usage_recorder.finish(errors=1 if result.status_code >= 400 else 0)
 
         # If original request was streaming, convert result to streaming format
         if stream:
@@ -475,6 +499,7 @@ async def create_message(
                     model,
                     upstream_body=upstream_body,
                     responses_upstream=responses_upstream,
+                    usage_recorder=usage_recorder,
                 ),
                 client,
                 owned,
@@ -515,12 +540,16 @@ async def create_message(
                             message=error_message,
                         )
                     )
+                    if usage_recorder:
+                        usage_recorder.finish(errors=1)
                     return JSONResponse(
                         status_code=response.status_code,
                         content=error_response.model_dump(),
                     )
 
                 if not response.content:
+                    if usage_recorder:
+                        usage_recorder.finish(errors=1)
                     error_response = AnthropicErrorResponse(
                         error=AnthropicError(
                             type="api_error",
@@ -535,6 +564,8 @@ async def create_message(
                 try:
                     openai_completion = response.json()
                 except json.JSONDecodeError as e:
+                    if usage_recorder:
+                        usage_recorder.finish(errors=1)
                     error_response = AnthropicErrorResponse(
                         error=AnthropicError(
                             type="api_error",
@@ -552,6 +583,9 @@ async def create_message(
 
                 openai_completion = _to_chat(openai_completion)
 
+                if usage_recorder:
+                    usage_recorder.upstream(openai_completion.get("usage"))
+
                 from openai.types.chat import ChatCompletion
 
                 completion = ChatCompletion.model_validate(openai_completion)
@@ -565,9 +599,14 @@ async def create_message(
                     f"[Anthropic Response] {json.dumps(anthropic_response, ensure_ascii=False, indent=2)}"
                 )
 
+                if usage_recorder:
+                    usage_recorder.finish()
+
                 return JSONResponse(content=anthropic_response)
 
             except httpx.TimeoutException:
+                if usage_recorder:
+                    usage_recorder.finish(errors=1)
                 error_response = AnthropicErrorResponse(
                     error=AnthropicError(
                         type="timeout_error", message="Request timed out"
@@ -578,6 +617,8 @@ async def create_message(
                     content=error_response.model_dump(),
                 )
             except httpx.RequestError as e:
+                if usage_recorder:
+                    usage_recorder.finish(errors=1)
                 message = describe_upstream_error(e, url)
                 logger.error("[Anthropic] %s", message)
                 error_response = AnthropicErrorResponse(
@@ -804,6 +845,26 @@ async def openai_chat_completions(
         else body_json
     )
 
+    # No model mapping on this passthrough path (deliberate, see ADR for the
+    # native passthrough), so client model == upstream model for accounting.
+    passthrough_model = body_json.get("model", "")
+    usage_recorder = _start_usage(
+        request, "/v1/chat/completions", passthrough_model, passthrough_model
+    )
+
+    # Streaming chat passthrough: ask the upstream for usage so the ledger
+    # stays honest. When the client did not request include_usage itself, the
+    # extra usage-only chunk is stripped again below — the client-visible
+    # stream must not change.
+    inject_usage = bool(stream) and not responses_upstream and not (
+        (body_json.get("stream_options") or {}).get("include_usage")
+    )
+    if inject_usage and isinstance(upstream_body, dict):
+        upstream_body = {
+            **upstream_body,
+            "stream_options": {"include_usage": True},
+        }
+
     if stream:
         client, owned = _get_http_client(request)
         return StreamingResponse(
@@ -814,6 +875,8 @@ async def openai_chat_completions(
                     headers,
                     upstream_body,
                     responses_upstream=responses_upstream,
+                    usage_recorder=usage_recorder,
+                    strip_usage_chunks=inject_usage,
                 ),
                 client,
                 owned,
@@ -826,6 +889,8 @@ async def openai_chat_completions(
             response = await client.post(url, headers=headers, json=upstream_body)
 
             if not response.content:
+                if usage_recorder:
+                    usage_recorder.finish(errors=1)
                 return JSONResponse(
                     status_code=502,
                     content={"error": {"message": "Upstream API returned empty response", "type": "api_error"}},
@@ -834,6 +899,8 @@ async def openai_chat_completions(
             try:
                 response_json = response.json()
             except json.JSONDecodeError as e:
+                if usage_recorder:
+                    usage_recorder.finish(errors=1)
                 return JSONResponse(
                     status_code=502,
                     content={"error": {"message": f"Failed to parse upstream response: {e}", "type": "api_error"}},
@@ -852,14 +919,29 @@ async def openai_chat_completions(
                         response_json, body_json.get("model", "")
                     )
 
+            if usage_recorder:
+                if response.status_code >= 400:
+                    usage_recorder.finish(errors=1)
+                else:
+                    usage_recorder.upstream(
+                        response_json.get("usage")
+                        if isinstance(response_json, dict)
+                        else None
+                    )
+                    usage_recorder.finish()
+
             return JSONResponse(status_code=response.status_code, content=response_json)
 
         except httpx.TimeoutException:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             return JSONResponse(
                 status_code=504,
                 content={"error": {"message": "Request timed out", "type": "timeout_error"}},
             )
         except httpx.RequestError as e:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             message = describe_upstream_error(e, url)
             logger.error("[OpenAI Passthrough] %s", message)
             return JSONResponse(
@@ -875,15 +957,26 @@ async def _openai_stream_proxy(
     body_json: dict,
     *,
     responses_upstream: bool = False,
+    usage_recorder=None,
+    strip_usage_chunks: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Stream-proxy an OpenAI request — pass chunks through unchanged.
 
     With ``responses_upstream`` the upstream emits Responses events, so they are
-    translated to chat chunks first; the client still asked for chat.
+    translated to chat chunks first; the client still asked for chat. With
+    ``strip_usage_chunks`` the usage-only chunk we asked the upstream for
+    (``stream_options.include_usage``) is removed again so the client-visible
+    stream stays byte-compatible with a proxy that never asked.
+
+    ``usage_recorder`` gets the final usage (chat usage chunk, or the
+    ``response.completed`` event on a raw Responses passthrough) and is
+    finished exactly once in ``finally``.
     """
+    stream_errored = False
     try:
         async with client.stream("POST", url, headers=headers, json=body_json) as response:
             if response.status_code != 200:
+                stream_errored = True
                 error_body = await response.aread()
                 error_text = error_body.decode("utf-8", errors="replace").strip()
                 err_text = error_text or f"Upstream error ({response.status_code})"
@@ -899,11 +992,24 @@ async def _openai_stream_proxy(
                 )
 
                 async for chunk in responses_sse_as_chat_sse(lines):
+                    usage_recorder_saw = _sniff_chat_usage(chunk)
+                    if usage_recorder_saw is not None and usage_recorder:
+                        usage_recorder.latest(usage_recorder_saw)
+                    if strip_usage_chunks and usage_recorder_saw is not None:
+                        continue
                     yield chunk
                 return
 
             async for line in lines:
                 if line.startswith("data: "):
+                    payload = _sniff_stream_usage(line)
+                    if payload is not None and usage_recorder:
+                        # Raw Responses passthrough reports usage inside the
+                        # response.completed event; chat streams in the
+                        # usage-only chunk.
+                        usage_recorder.latest(payload)
+                        if strip_usage_chunks:
+                            continue
                     yield f"{line}\n\n"
                 elif line.strip() == "":
                     yield "\n"
@@ -911,8 +1017,59 @@ async def _openai_stream_proxy(
                     yield f"{line}\n"
 
     except Exception as e:
+        stream_errored = True
         yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'internal_error'}})}\n\n"
         yield "data: [DONE]\n\n"
+    finally:
+        if usage_recorder:
+            usage_recorder.finish(errors=1 if stream_errored else 0)
+
+
+def _sniff_chat_usage(sse_chunk: str) -> dict | None:
+    """Extract the usage dict from a chat-SSE usage-only chunk, if any."""
+    if not sse_chunk.startswith("data: "):
+        return None
+    data = sse_chunk[6:].strip()
+    if data == "[DONE]":
+        return None
+    try:
+        chunk = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(chunk, dict):
+        return None
+    usage = chunk.get("usage")
+    if isinstance(usage, dict) and usage and not chunk.get("choices"):
+        return usage
+    return None
+
+
+def _sniff_stream_usage(line: str) -> dict | None:
+    """Extract usage from a raw SSE line: chat usage chunk or Responses completed.
+
+    Used on passthrough paths, where the body is forwarded unchanged and the
+    only sight of usage is inside the stream itself.
+    """
+    if not line.startswith("data: "):
+        return None
+    data = line[6:].strip()
+    if data == "[DONE]":
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("type") == "response.completed":
+        response = payload.get("response")
+        if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+            return response["usage"]
+        return None
+    usage = payload.get("usage")
+    if isinstance(usage, dict) and usage and not payload.get("choices"):
+        return usage
+    return None
 
 
 # ── OpenAI Responses API bridge ──────────────────────────────────────────────
@@ -936,7 +1093,7 @@ def _has_web_search_tool(body: dict[str, Any]) -> bool:
 
 
 async def _proxy_responses_passthrough(
-    request: Request, settings: Settings, body: dict[str, Any]
+    request: Request, settings: Settings, body: dict[str, Any], usage_recorder=None
 ):
     """Forward a Responses request to a Responses upstream unchanged."""
     url = _upstream_url(settings, "responses")
@@ -956,7 +1113,11 @@ async def _proxy_responses_passthrough(
         client, owned = _get_http_client(request)
         return StreamingResponse(
             _closing_stream(
-                _openai_stream_proxy(client, url, headers, body), client, owned
+                _openai_stream_proxy(
+                    client, url, headers, body, usage_recorder=usage_recorder
+                ),
+                client,
+                owned,
             ),
             media_type="text/event-stream",
         )
@@ -965,11 +1126,15 @@ async def _proxy_responses_passthrough(
         try:
             response = await client.post(url, headers=headers, json=body)
         except httpx.TimeoutException:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             return JSONResponse(
                 status_code=504,
                 content={"error": {"message": "Request timed out", "type": "timeout_error"}},
             )
         except httpx.RequestError as e:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             message = describe_upstream_error(e, url)
             logger.error("[Responses Passthrough] %s", message)
             return JSONResponse(
@@ -978,6 +1143,8 @@ async def _proxy_responses_passthrough(
             )
 
         if not response.content:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             return JSONResponse(
                 status_code=502,
                 content={
@@ -990,6 +1157,8 @@ async def _proxy_responses_passthrough(
         try:
             payload = response.json()
         except json.JSONDecodeError as e:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             return JSONResponse(
                 status_code=502,
                 content={
@@ -999,6 +1168,14 @@ async def _proxy_responses_passthrough(
                     }
                 },
             )
+        if usage_recorder:
+            if response.status_code >= 400:
+                usage_recorder.finish(errors=1)
+            else:
+                usage_recorder.upstream(
+                    payload.get("usage") if isinstance(payload, dict) else None
+                )
+                usage_recorder.finish()
         return JSONResponse(status_code=response.status_code, content=payload)
 
 
@@ -1056,6 +1233,8 @@ async def openai_responses(
         logger.debug("Model name mapped: %s -> %s", original_model, resolved_model)
         body_json["model"] = resolved_model
 
+    usage_recorder = _start_usage(request, "/v1/responses", resolved_model, original_model)
+
     # Client and upstream both speak Responses: forward the body untouched.
     #
     # The local web-search loop below speaks chat/completions, so it cannot run
@@ -1068,7 +1247,9 @@ async def openai_responses(
                 "Responses upstream: forwarding the web_search tool unchanged; "
                 "the local search provider is not used on this path."
             )
-        return await _proxy_responses_passthrough(request, settings, body_json)
+        return await _proxy_responses_passthrough(
+            request, settings, body_json, usage_recorder=usage_recorder
+        )
 
     instructions = body_json.get("instructions")
     if isinstance(instructions, list):
@@ -1127,7 +1308,16 @@ async def openai_responses(
                 model,
                 instructions if isinstance(instructions, str) else None,
                 stream=stream,
+                usage_recorder=usage_recorder,
             )
+            if usage_recorder:
+                # Non-streaming failures come back as JSONResponse with an
+                # error status; streaming failures end as response.failed
+                # with no usage, which the ledger records as unreported.
+                if hasattr(result, "status_code") and result.status_code >= 400:
+                    usage_recorder.finish(errors=1)
+                else:
+                    usage_recorder.finish()
             if stream:
                 return StreamingResponse(result, media_type="text/event-stream")
             return result
@@ -1144,7 +1334,10 @@ async def openai_responses(
         client, owned = _get_http_client(request)
         return StreamingResponse(
             _closing_stream(
-                _stream_responses(client, url, headers, chat_params, model, instructions),
+                _stream_responses(
+                    client, url, headers, chat_params, model, instructions,
+                    usage_recorder=usage_recorder,
+                ),
                 client,
                 owned,
             ),
@@ -1160,12 +1353,16 @@ async def openai_responses(
                 if not raw_text:
                     raw_text = response.reason_phrase or f"Upstream API error ({response.status_code})"
                 raw_text += upstream_diagnostic("POST", url, response.status_code)
+                if usage_recorder:
+                    usage_recorder.finish(errors=1)
                 return JSONResponse(
                     status_code=response.status_code,
                     content={"error": {"message": raw_text, "type": "api_error"}},
                 )
 
             if not response.content:
+                if usage_recorder:
+                    usage_recorder.finish(errors=1)
                 return JSONResponse(
                     status_code=502,
                     content={"error": {"message": "Upstream API returned empty response", "type": "api_error"}},
@@ -1174,6 +1371,8 @@ async def openai_responses(
             try:
                 openai_completion = response.json()
             except json.JSONDecodeError as e:
+                if usage_recorder:
+                    usage_recorder.finish(errors=1)
                 return JSONResponse(
                     status_code=502,
                     content={"error": {"message": f"Failed to parse upstream response: {e}", "type": "api_error"}},
@@ -1186,6 +1385,15 @@ async def openai_responses(
             from openai.types.chat import ChatCompletion
 
             completion = ChatCompletion.model_validate(openai_completion)
+
+            if usage_recorder:
+                if completion.usage is not None:
+                    try:
+                        usage_recorder.upstream(completion.usage.model_dump())
+                    except Exception:
+                        logger.warning("Usage recording failed", exc_info=True)
+                usage_recorder.finish()
+
             responses_payload = convert_chat_completion_to_responses(
                 completion,
                 model=model,
@@ -1202,11 +1410,15 @@ async def openai_responses(
             return JSONResponse(content=responses_payload)
 
         except httpx.TimeoutException:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             return JSONResponse(
                 status_code=504,
                 content={"error": {"message": "Request timed out", "type": "timeout_error"}},
             )
         except httpx.RequestError as e:
+            if usage_recorder:
+                usage_recorder.finish(errors=1)
             message = describe_upstream_error(e, url)
             logger.error("[Responses] %s", message)
             return JSONResponse(
@@ -1222,17 +1434,20 @@ async def _stream_responses(
     chat_params: dict,
     model: str,
     instructions: str | None,
+    usage_recorder=None,
 ) -> AsyncGenerator[str, None]:
     """Stream chat/completions upstream and emit Responses-format SSE events."""
     from cc_convert.responses_converter import (
         stream_responses_from_chat_completion,
     )
 
+    stream_errored = False
     try:
         async with client.stream(
             "POST", url, headers=headers, json=chat_params
         ) as response:
             if response.status_code != 200:
+                stream_errored = True
                 error_body = await response.aread()
                 error_text = error_body.decode("utf-8", errors="replace").strip()
                 error_text = error_text or f"Upstream error ({response.status_code})"
@@ -1258,14 +1473,24 @@ async def _stream_responses(
                 async for line in response.aiter_lines():
                     yield line
 
+            async def _usage_sniffing_iter():
+                # stream_responses_from_chat_completion consumes the usage
+                # chunk; peek at each line first so the ledger still sees it.
+                async for line in _line_iter():
+                    usage = _sniff_stream_usage(line)
+                    if usage is not None and usage_recorder:
+                        usage_recorder.latest(usage)
+                    yield line
+
             async for sse_chunk in stream_responses_from_chat_completion(
-                _line_iter(),
+                _usage_sniffing_iter(),
                 model=model,
                 instructions=instructions if isinstance(instructions, str) else None,
             ):
                 yield sse_chunk
 
     except Exception as e:
+        stream_errored = True
         import traceback
 
         logger.error(f"Responses stream error: {e}\n{traceback.format_exc()}")
@@ -1282,3 +1507,6 @@ async def _stream_responses(
             },
         }
         yield f"event: response.failed\ndata: {json.dumps(err_payload, ensure_ascii=False)}\n\n"
+    finally:
+        if usage_recorder:
+            usage_recorder.finish(errors=1 if stream_errored else 0)

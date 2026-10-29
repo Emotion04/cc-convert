@@ -25,8 +25,9 @@ from cc_convert.config import Settings, get_config_file, get_settings
 from cc_convert.launcher import INTERNAL_ARGS as _INTERNAL_ARGS
 from cc_convert.protocol import AnthropicError, AnthropicErrorResponse
 from cc_convert.router import build_upstream_timeout, openai_router, router
-from cc_convert.runtime_paths import get_log_dir
+from cc_convert.runtime_paths import get_log_dir, get_usage_db_file
 from cc_convert.runtime_state import InstanceRuntimeState
+from cc_convert.usage.ledger import UsageCollector
 from cc_convert.web import web_router
 
 
@@ -148,7 +149,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return create_proxy_app(settings, instance_id="worker", internal_token="")
 
 
-def create_proxy_app(settings: Settings, instance_id: str, internal_token: str, revision: int = 0) -> FastAPI:
+def create_proxy_app(
+    settings: Settings,
+    instance_id: str,
+    internal_token: str,
+    revision: int = 0,
+    usage_db_path: str | Path | None = "default",
+) -> FastAPI:
     """Create an CC Convert Proxy Worker app instance.
 
     Args:
@@ -158,10 +165,16 @@ def create_proxy_app(settings: Settings, instance_id: str, internal_token: str, 
         revision: Store revision this worker was launched for (used by
             supervisor health-check to confirm the worker matches the
             latest persisted config)
+        usage_db_path: Where the token-usage SQLite database lives. The
+            default sentinel resolves to the shared runtime ``usage.db``;
+            pass ``None`` to disable persistence (in-memory accounting only).
 
     Returns:
         Configured FastAPI application for the proxy worker
     """
+    if usage_db_path == "default":
+        usage_db_path = get_usage_db_file()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # One connection pool per worker for its whole lifetime: TCP and TLS
@@ -174,6 +187,10 @@ def create_proxy_app(settings: Settings, instance_id: str, internal_token: str, 
             yield
         finally:
             await app.state.http_client.aclose()
+            # Persist whatever usage is still in memory before exiting.
+            usage = getattr(app.state, "usage", None)
+            if usage is not None:
+                usage.close()
 
     app = FastAPI(
         title="CC Convert Proxy Worker",
@@ -191,6 +208,11 @@ def create_proxy_app(settings: Settings, instance_id: str, internal_token: str, 
 
     # Initialize per-instance runtime state for statistics
     app.state.runtime_state = InstanceRuntimeState(instance_id=instance_id, revision=revision)
+
+    # Token usage accounting: in-memory ledger + background SQLite flush.
+    # Collection points live in router.py / streaming / tools; failures there
+    # must never affect proxying (the recorder swallows its own exceptions).
+    app.state.usage = UsageCollector(instance_id, db_path=usage_db_path)
 
     # Add CORS middleware
     app.add_middleware(
@@ -242,6 +264,9 @@ def create_proxy_app(settings: Settings, instance_id: str, internal_token: str, 
             "total_errors": state.total_errors,
             "error_rate": state.error_rate,
             "status": state.status,
+            # Additive field (supervisor health checks ignore it): today's
+            # token usage as accumulated in memory.
+            "usage": request.app.state.usage.summary(),
         }
 
     # Exception handlers — keep existing Anthropic-style error responses

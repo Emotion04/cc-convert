@@ -87,6 +87,7 @@ async def _run_web_search_loop(
     headers: dict[str, str],
     settings: Settings,
     model: str,
+    usage_recorder=None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], JSONResponse | None]:
     """Run the upstream ↔ web_search loop.
 
@@ -94,6 +95,9 @@ async def _run_web_search_loop(
     On success, ``error_response`` is ``None``. On upstream/network error,
     ``final_completion_json`` is ``None`` and ``error_response`` carries the
     failure as a Responses-friendly error payload.
+
+    ``usage_recorder`` gets one ``upstream()`` per loop iteration (the loop
+    can hit the upstream several times for one client request).
     """
     configs = params.pop("_server_tools_config", {})
     handler = ServerToolHandler([WebSearchServerTool], configs, settings)
@@ -132,6 +136,11 @@ async def _run_web_search_loop(
                 return None, [], _error_json(502, "api_error", f"Failed to parse upstream response: {e}")
 
             completion = ChatCompletion.model_validate(completion_data)
+            if usage_recorder is not None and completion.usage is not None:
+                try:
+                    usage_recorder.upstream(completion.usage.model_dump())
+                except Exception:  # accounting must not break the loop
+                    logger.warning("Usage recording failed", exc_info=True)
             choice = completion.choices[0] if completion.choices else None
             tool_calls = getattr(getattr(choice, "message", None), "tool_calls", None) if choice else None
 
@@ -307,6 +316,7 @@ async def handle_responses_with_web_search(
     model: str,
     instructions: str | None,
     stream: bool,
+    usage_recorder=None,
 ) -> JSONResponse | AsyncGenerator[str, None]:
     """Entry point: run the web_search loop and return a Responses response.
 
@@ -317,7 +327,7 @@ async def handle_responses_with_web_search(
     loop_params = _prepare_chat_params_for_loop(chat_params, web_search_configs)
 
     final_completion, web_search_items, err = await _run_web_search_loop(
-        loop_params, url, headers, settings, model
+        loop_params, url, headers, settings, model, usage_recorder=usage_recorder
     )
     if err is not None:
         return err

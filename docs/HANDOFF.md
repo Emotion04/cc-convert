@@ -1,12 +1,13 @@
 # HANDOFF — 接手说明
 
 > 写给下一个接手的人 / agent。读这份 + [文档索引](README.md) 就能继续。
-> 最后更新：2026-10-29。
+> 最后更新：2026-10-30。
 
 ## 0. 一句话现状
 
-协议桥本体是稳定可用的；**本次会话的改动全部在工作区、尚未提交**（测试 719 passed）；
-下一个任务是按 [用量统计实施计划](用量统计实施计划.md) 从 P0 开始实现 Token 用量面板。
+协议桥本体稳定可用；基线与 **用量统计 P0（采集 + SQLite 存储）已提交**
+（全量 794 passed, 6 skipped；usage 模块覆盖率 95%；实机验收通过）。
+下一个任务是按 [用量统计实施计划](用量统计实施计划.md) 做 **P1 总览面板**。
 
 ## 1. 先做这三件事
 
@@ -81,11 +82,22 @@ M  tests/{test_daemon_advanced,test_passthrough,test_profile_store,test_thinking
 
 **建议**：先单独提交一个基线 commit（一句话说明），再开始用量统计。否则 P0 的 diff 会和这批改动混在一起，出问题无法 bisect。
 
-## 4. 下一个任务：Token 用量统计
+## 4. 下一个任务：Token 用量统计 P1（总览面板）
 
 - 设计：[用量统计设计.md](用量统计设计.md)
 - 计划（任务分解/验收/顺序）：[用量统计实施计划.md](用量统计实施计划.md)
-- 从 **P0（采集 + SQLite 存储）** 开始；P1 总览面板；P2 计费；P3 对比。
+- **P0 已完成**：`src/cc_convert/usage/`（recording 归一化 / ledger 内存台账 /
+  store SQLite）、`~/%LOCALAPPDATA%/ccconvert/usage.db`（WAL，schema_version=1）、
+  `/_ccconvert/status` 新增 `usage` 字段（只加不改，向后兼容）。
+- P1 总览面板；P2 计费；P3 对比。
+- P0 的实现要点：
+  - 请求线程只做内存累加，后台线程每 5 s flush，进程退出（lifespan）再刷一次。
+  - 拿不到 usage 记 `unreported`，绝不按 0 记账；流式多见。
+  - 流式用 `recorder.latest()`（最后一次上报为准，防重复计数）；
+    服务端工具循环用 `recorder.upstream()`（逐次累加）。
+  - chat/Responses 的 `input_tokens` **含缓存**，Anthropic 的**不含**——
+    `recording.normalize_usage()` 已按字段形状区分，别改坏。
+  - chat 透传流给上游注入 `include_usage`，客户端没要求时会把 usage chunk 剥离再转发。
 
 ### 开始前必须知道的三个决定（已定）
 
@@ -138,7 +150,8 @@ curl -s http://127.0.0.1:18408/v1/messages -H "Authorization: Bearer local" \
 
 ## 9. 交接时的未决问题
 
-- 用量统计的 P0 尚未动工；`runtime_state.py` 目前只有请求/错误计数。
+- 用量统计 P1 面板未动工；`GET /api/usage/summary` 还不存在（store.query 已备好聚合查询）。
 - 是否要在 P4 做「余额探测」取决于目标中转是否提供接口（暂按尽力而为设计）。
 - Docker 路径未验证，用户主线是 `uv` 源码运行。
 - `tests/test_integration.py` 有无条件 skip，属已知工具缺口（不影响本次任务）。
+- `usage_bucket.vendor` 列暂存空串（默认=实例名），P2 做计费时再决定是否单独维护。

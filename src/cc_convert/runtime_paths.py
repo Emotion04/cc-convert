@@ -72,6 +72,18 @@ def get_manager_state_file() -> Path:
     return get_runtime_dir() / "manager.json"
 
 
+def get_usage_db_file() -> Path:
+    """Get path to the shared token-usage SQLite database.
+
+    All workers append to this one file (WAL mode keeps them from blocking
+    each other), so history survives instance restarts.
+
+    Returns:
+        Path to usage.db under the runtime directory
+    """
+    return get_runtime_dir() / "usage.db"
+
+
 def get_instance_dir(instance_id: str) -> Path:
     """Get per-instance data directory.
 
