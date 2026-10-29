@@ -7,9 +7,10 @@ import asyncio
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -37,6 +38,14 @@ def _templates_directory() -> Path:
     if bundled:
         return Path(bundled) / "cc_convert" / "web" / "templates"
     return Path(__file__).parent / "templates"
+
+
+def _static_directory() -> Path:
+    """Locate the vendored static assets (see :func:`_templates_directory`)."""
+    bundled = getattr(sys, "_MEIPASS", None)
+    if bundled:
+        return Path(bundled) / "cc_convert" / "web" / "static"
+    return Path(__file__).parent / "static"
 
 
 templates_dir = _templates_directory()
@@ -215,6 +224,193 @@ async def api_test_page(request: Request):
 async def docs_page(request: Request):
     """Custom API documentation page (standalone layout, not base.html)."""
     return templates.TemplateResponse(request, "docs.html")
+
+
+@web_router.get("/usage", response_class=HTMLResponse)
+async def usage_page(request: Request):
+    """Token usage overview dashboard."""
+    return templates.TemplateResponse(request, "usage.html")
+
+
+# ---------------------------------------------------------------------------
+# Token usage statistics
+# ---------------------------------------------------------------------------
+
+#: group_by 参数 → usage_bucket 列名。
+_USAGE_GROUP_COLUMNS = {
+    "instance": "instance_id",
+    "model": "model",
+    "client_model": "client_model",
+    "endpoint": "endpoint",
+    "prompt_class": "prompt_class",
+}
+
+_USAGE_COUNTERS = (
+    "input_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+    "cache_read",
+    "cache_write",
+    "cache_write_1h",
+    "cache_write_est",
+    "requests",
+    "errors",
+    "unreported",
+    "duration_ms",
+)
+
+
+def _sum_rows(rows: list[dict]) -> dict:
+    totals = dict.fromkeys(_USAGE_COUNTERS, 0)
+    for row in rows:
+        for key in _USAGE_COUNTERS:
+            totals[key] += row.get(key) or 0
+    return totals
+
+
+def _cache_rate(totals: dict) -> float | None:
+    denominator = (
+        totals["input_tokens"]
+        + totals["cache_read"]
+        + totals["cache_write"]
+        + totals["cache_write_1h"]
+    )
+    if denominator <= 0:
+        return None
+    return round(totals["cache_read"] / denominator, 4)
+
+
+def _open_usage_store():
+    """Open the shared usage.db read-only-ish, or None when it doesn't exist.
+
+    The manager never creates the file: workers own it. Opening it here would
+    produce an empty database on a fresh install and hide the "no data yet"
+    state from the panel.
+    """
+    from cc_convert.runtime_paths import get_usage_db_file
+    from cc_convert.usage.store import UsageStore
+
+    path = get_usage_db_file()
+    if not path.exists():
+        return None
+    try:
+        return UsageStore(path)
+    except Exception:
+        return None
+
+
+def _parse_usage_range(from_date: str | None, to_date: str | None) -> tuple[int, int]:
+    """Resolve the query window to epoch seconds (local midnight boundaries).
+
+    ``to`` is inclusive as a date. Defaults to the last 7 days.
+    """
+    today = datetime.now().date()
+    try:
+        start = (
+            datetime.strptime(from_date, "%Y-%m-%d").date()
+            if from_date
+            else today - timedelta(days=6)
+        )
+    except ValueError as exc:
+        raise HTTPException(400, f"from 格式应为 YYYY-MM-DD: {exc}") from exc
+    try:
+        end_exclusive = (
+            datetime.strptime(to_date, "%Y-%m-%d").date() + timedelta(days=1)
+            if to_date
+            else today + timedelta(days=1)
+        )
+    except ValueError as exc:
+        raise HTTPException(400, f"to 格式应为 YYYY-MM-DD: {exc}") from exc
+    if end_exclusive <= start:
+        raise HTTPException(400, "to 必须晚于 from")
+    return (
+        datetime(start.year, start.month, start.day).timestamp(),
+        datetime(end_exclusive.year, end_exclusive.month, end_exclusive.day).timestamp(),
+    )
+
+
+@web_router.get("/api/usage/summary")
+async def usage_summary(
+    request: Request,
+    from_date: str | None = Query(default=None, alias="from"),
+    to_date: str | None = Query(default=None, alias="to"),
+    granularity: str = Query(default="day"),
+    group_by: str | None = Query(default=None),
+):
+    """Aggregate token usage over a date range.
+
+    Returns totals, a time series (hour/day, local time) and an optional
+    per-group breakdown. Cost fields arrive with P2 (billing engine).
+    """
+    from_ts, to_ts = _parse_usage_range(from_date, to_date)
+    if granularity not in ("hour", "day"):
+        raise HTTPException(400, "granularity 只支持 hour / day")
+    group_column = None
+    if group_by:
+        group_column = _USAGE_GROUP_COLUMNS.get(group_by)
+        if group_column is None:
+            raise HTTPException(
+                400, f"group_by 只支持 {'/'.join(_USAGE_GROUP_COLUMNS)}"
+            )
+
+    store = _open_usage_store()
+    try:
+        rows = store.query(from_ts, to_ts) if store else []
+    finally:
+        if store is not None:
+            store.close()
+
+    totals = _sum_rows(rows)
+    totals["cache_rate"] = _cache_rate(totals)
+
+    series_map: dict = {}
+    for row in rows:
+        ts = row["ts"]
+        if granularity == "day":
+            key = int(datetime.fromtimestamp(ts).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ).timestamp())
+        else:
+            key = ts - ts % 3600
+        bucket = series_map.setdefault(key, dict.fromkeys(_USAGE_COUNTERS, 0))
+        for counter in _USAGE_COUNTERS:
+            bucket[counter] += row.get(counter) or 0
+
+    series = [
+        {
+            "ts": key,
+            "label": (
+                datetime.fromtimestamp(key).strftime("%m-%d")
+                if granularity == "day"
+                else datetime.fromtimestamp(key).strftime("%m-%d %H:00")
+            ),
+            **{c: values[c] for c in _USAGE_COUNTERS},
+        }
+        for key, values in sorted(series_map.items())
+    ]
+
+    groups = []
+    if group_column:
+        group_map: dict = {}
+        for row in rows:
+            key = row.get(group_column) or "(未知)"
+            bucket = group_map.setdefault(key, dict.fromkeys(_USAGE_COUNTERS, 0))
+            for counter in _USAGE_COUNTERS:
+                bucket[counter] += row.get(counter) or 0
+        for key, values in sorted(
+            group_map.items(), key=lambda kv: kv[1]["output_tokens"], reverse=True
+        ):
+            entry = {"key": key, **values, "cache_rate": _cache_rate(values)}
+            groups.append(entry)
+
+    return {
+        "from": datetime.fromtimestamp(from_ts).strftime("%Y-%m-%d"),
+        "to": datetime.fromtimestamp(to_ts).strftime("%Y-%m-%d"),
+        "granularity": granularity,
+        "totals": totals,
+        "series": series,
+        "groups": groups,
+    }
 
 
 # ---------------------------------------------------------------------------

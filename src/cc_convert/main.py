@@ -356,6 +356,18 @@ def create_manager_app(store, supervisor) -> FastAPI:
     app.state.store = store
     app.state.supervisor = supervisor
 
+    # Vendored frontend assets (Chart.js etc.) — served locally so the
+    # dashboard keeps working offline / behind the firewall.
+    from fastapi.staticfiles import StaticFiles
+
+    from cc_convert.web.routes import _static_directory
+
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(_static_directory())),
+        name="static",
+    )
+
     # Generate per-startup CSRF token
     app.state.csrf_token = secrets.token_urlsafe(32)
 

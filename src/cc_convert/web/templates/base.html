@@ -222,6 +222,14 @@
                 </div>
 
                 <p class="px-3 pt-4 pb-2 text-[10px] font-semibold text-stone-400 uppercase tracking-widest">管理</p>
+                <a href="/usage" class="nav-link flex items-center gap-3 px-3 py-2.5 text-sm text-stone-600 {% if request.url.path == '/usage' %}active{% endif %}">
+                    <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="20" x2="18" y2="10"/>
+                        <line x1="12" y1="20" x2="12" y2="4"/>
+                        <line x1="6" y1="20" x2="6" y2="14"/>
+                    </svg>
+                    <span>用量统计</span>
+                </a>
                 <a href="/config" class="nav-link flex items-center gap-3 px-3 py-2.5 text-sm text-stone-600 {% if request.url.path == '/config' %}active{% endif %}">
                     <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"/>

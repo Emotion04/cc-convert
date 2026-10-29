@@ -5,9 +5,9 @@
 
 ## 0. 一句话现状
 
-协议桥本体稳定可用；基线与 **用量统计 P0（采集 + SQLite 存储）已提交**
-（全量 794 passed, 6 skipped；usage 模块覆盖率 95%；实机验收通过）。
-下一个任务是按 [用量统计实施计划](用量统计实施计划.md) 做 **P1 总览面板**。
+协议桥本体稳定可用；**用量统计 P0（采集 + SQLite）与 P1（总览面板 /usage）已提交**
+（全量 807 passed, 6 skipped；实机与浏览器冒烟通过）。
+下一个任务是按 [用量统计实施计划](用量统计实施计划.md) 做 **P2 计费引擎**。
 
 ## 1. 先做这三件事
 
@@ -82,15 +82,18 @@ M  tests/{test_daemon_advanced,test_passthrough,test_profile_store,test_thinking
 
 **建议**：先单独提交一个基线 commit（一句话说明），再开始用量统计。否则 P0 的 diff 会和这批改动混在一起，出问题无法 bisect。
 
-## 4. 下一个任务：Token 用量统计 P1（总览面板）
+## 4. 下一个任务：Token 用量统计 P2（计费引擎）
 
 - 设计：[用量统计设计.md](用量统计设计.md)
 - 计划（任务分解/验收/顺序）：[用量统计实施计划.md](用量统计实施计划.md)
-- **P0 已完成**：`src/cc_convert/usage/`（recording 归一化 / ledger 内存台账 /
-  store SQLite）、`~/%LOCALAPPDATA%/ccconvert/usage.db`（WAL，schema_version=1）、
-  `/_ccconvert/status` 新增 `usage` 字段（只加不改，向后兼容）。
-- P1 总览面板；P2 计费；P3 对比。
-- P0 的实现要点：
+- **P0/P1 已完成**：
+  - P0：`src/cc_convert/usage/`（recording / ledger / store）、共享
+    `usage.db`（WAL, schema_version=1）、`/_ccconvert/status` 带 `usage` 字段。
+  - P1：`GET /api/usage/summary`（totals/series/groups，本地时区按天/小时聚合）、
+    `/usage` 页面（KPI + 堆叠趋势 + 环形 + 分组条形 + 明细表）、
+    侧边栏「用量统计」入口、Chart.js 本地 vendored 于 `web/static/vendor/`。
+- P2 计费；P3 对比页。
+- P0 的实现要点（改代码前必读）：
   - 请求线程只做内存累加，后台线程每 5 s flush，进程退出（lifespan）再刷一次。
   - 拿不到 usage 记 `unreported`，绝不按 0 记账；流式多见。
   - 流式用 `recorder.latest()`（最后一次上报为准，防重复计数）；
@@ -98,6 +101,8 @@ M  tests/{test_daemon_advanced,test_passthrough,test_profile_store,test_thinking
   - chat/Responses 的 `input_tokens` **含缓存**，Anthropic 的**不含**——
     `recording.normalize_usage()` 已按字段形状区分，别改坏。
   - chat 透传流给上游注入 `include_usage`，客户端没要求时会把 usage chunk 剥离再转发。
+  - 测试注意：`tests/test_usage_api.py` 用 monkeypatch 把 `CCCONVERT_RUNTIME_DIR`
+    指到私有目录——其它测试模块会往共享沙箱 usage.db 写数据并持有连接。
 
 ### 开始前必须知道的三个决定（已定）
 
@@ -150,7 +155,7 @@ curl -s http://127.0.0.1:18408/v1/messages -H "Authorization: Bearer local" \
 
 ## 9. 交接时的未决问题
 
-- 用量统计 P1 面板未动工；`GET /api/usage/summary` 还不存在（store.query 已备好聚合查询）。
+- 用量统计 P2 计费未动工；`price_catalog` 等表还不存在，面板成本列显示「计费引擎上线后提供」。
 - 是否要在 P4 做「余额探测」取决于目标中转是否提供接口（暂按尽力而为设计）。
 - Docker 路径未验证，用户主线是 `uv` 源码运行。
 - `tests/test_integration.py` 有无条件 skip，属已知工具缺口（不影响本次任务）。

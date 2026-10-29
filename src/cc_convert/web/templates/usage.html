@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block title %}用量统计 - CC Convert Manager{% endblock %}
+{% block page_title %}用量统计{% endblock %}
+{% block page_subtitle %}Token 用量与缓存命中（成本估算将在计费引擎上线后提供）{% endblock %}
+
+{% block extra_css %}
+<style>
+    .range-chip {
+        transition: all 0.15s ease;
+        cursor: pointer;
+    }
+    .range-chip.active {
+        background: #F97316;
+        color: white;
+        border-color: #F97316;
+    }
+    .kpi-value { font-variant-numeric: tabular-nums; }
+    table.usage-table th, table.usage-table td {
+        padding: 10px 14px;
+        text-align: right;
+        white-space: nowrap;
+    }
+    table.usage-table th:first-child, table.usage-table td:first-child {
+        text-align: left;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div x-data="usageDashboard()" x-init="init()" class="space-y-6">
+
+    <!-- Toolbar -->
+    <div class="glass-card rounded-2xl p-4 flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-1.5">
+            <template x-for="preset in presets" :key="preset.value">
+                <button @click="setPreset(preset.value)"
+                        class="range-chip px-3 py-1.5 rounded-lg text-sm border border-stone-200 text-stone-600 bg-white"
+                        :class="{ active: presetValue === preset.value }"
+                        x-text="preset.label"></button>
+            </template>
+        </div>
+        <div class="flex items-center gap-2 text-sm text-stone-500">
+            <input type="date" x-model="customFrom" @change="presetValue = 'custom'; refresh()"
+                   class="input-field rounded-lg px-2.5 py-1.5 text-sm">
+            <span>至</span>
+            <input type="date" x-model="customTo" @change="presetValue = 'custom'; refresh()"
+                   class="input-field rounded-lg px-2.5 py-1.5 text-sm">
+        </div>
+        <div class="flex items-center gap-2 text-sm text-stone-500">
+            <span>粒度</span>
+            <select x-model="granularity" @change="refresh()"
+                    class="input-field rounded-lg px-2.5 py-1.5 text-sm">
+                <option value="day">按天</option>
+                <option value="hour">按小时</option>
+            </select>
+        </div>
+        <div class="flex items-center gap-2 text-sm text-stone-500">
+            <span>分组</span>
+            <select x-model="groupBy" @change="refresh()"
+                    class="input-field rounded-lg px-2.5 py-1.5 text-sm">
+                <option value="">不分组</option>
+                <option value="instance">按实例</option>
+                <option value="model">按模型</option>
+                <option value="client_model">按请求模型</option>
+                <option value="endpoint">按入口</option>
+            </select>
+        </div>
+        <span x-show="loading" class="text-xs text-stone-400">加载中…</span>
+        <span x-show="!loading && lastUpdated" class="text-xs text-stone-400 ml-auto"
+              x-text="'更新于 ' + lastUpdated"></span>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+        <template x-for="kpi in kpis" :key="kpi.label">
+            <div class="stat-card rounded-2xl p-4">
+                <p class="text-xs text-stone-400 mb-1" x-text="kpi.label"></p>
+                <p class="kpi-value text-xl font-bold text-stone-800" x-text="kpi.value"></p>
+                <p class="text-[10px] text-stone-400 mt-1" x-text="kpi.hint"></p>
+            </div>
+        </template>
+    </div>
+
+    <!-- Unreported notice -->
+    <div x-show="totals.unreported > 0"
+         class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">
+        有 <b x-text="totals.unreported"></b> 次请求未上报用量（常见于流式请求或中转不支持
+        include_usage）。这些请求<strong>没有</strong>被记入下面的 token 数字，避免低估。
+    </div>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div class="glass-card rounded-2xl p-5 xl:col-span-2">
+            <h3 class="text-sm font-semibold text-stone-700 mb-3">用量趋势（堆叠）</h3>
+            <div class="h-72"><canvas id="trend-chart"></canvas></div>
+        </div>
+        <div class="glass-card rounded-2xl p-5">
+            <h3 class="text-sm font-semibold text-stone-700 mb-3">构成占比</h3>
+            <div class="h-72"><canvas id="share-chart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="glass-card rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-stone-700">分组对比</h3>
+            <div class="flex items-center gap-1.5 text-xs">
+                <template x-for="metric in barMetrics" :key="metric.value">
+                    <button @click="barMetric = metric.value; renderGroupChart()"
+                            class="range-chip px-2.5 py-1 rounded-lg border border-stone-200 text-stone-600 bg-white"
+                            :class="{ active: barMetric === metric.value }"
+                            x-text="metric.label"></button>
+                </template>
+            </div>
+        </div>
+        <div class="h-64"><canvas id="group-chart"></canvas></div>
+        <p x-show="groups.length === 0" class="text-sm text-stone-400 text-center py-10">
+            选择上方「分组」后这里显示各实例 / 模型的对比
+        </p>
+    </div>
+
+    <!-- Detail table -->
+    <div class="glass-card rounded-2xl p-5" x-show="groups.length > 0">
+        <h3 class="text-sm font-semibold text-stone-700 mb-3">明细</h3>
+        <div class="overflow-x-auto">
+            <table class="usage-table w-full text-sm">
+                <thead>
+                    <tr class="text-xs text-stone-400 border-b border-stone-200">
+                        <th class="text-left">分组</th>
+                        <th>请求</th>
+                        <th>输入</th>
+                        <th>输出</th>
+                        <th>缓存读</th>
+                        <th>缓存写</th>
+                        <th>缓存率</th>
+                        <th>未上报</th>
+                        <th>错误</th>
+                        <th>平均耗时</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="g in groups" :key="g.key">
+                        <tr class="border-b border-stone-100 hover:bg-stone-50">
+                            <td class="font-medium text-stone-700" x-text="g.key"></td>
+                            <td x-text="fmt(g.requests)"></td>
+                            <td x-text="fmt(g.input_tokens)"></td>
+                            <td x-text="fmt(g.output_tokens)"></td>
+                            <td x-text="fmt(g.cache_read)"></td>
+                            <td x-text="fmt(g.cache_write + g.cache_write_1h)"></td>
+                            <td x-text="g.cache_rate == null ? '—' : (g.cache_rate * 100).toFixed(1) + '%'"></td>
+                            <td x-text="g.unreported || '—'"></td>
+                            <td x-text="g.errors || '—'"></td>
+                            <td x-text="g.requests ? Math.round(g.duration_ms / g.requests) + ' ms' : '—'"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <p x-show="!loading && empty" class="text-center text-stone-400 text-sm py-16">
+        所选时间范围内没有用量数据——发几个请求后再回来看。
+    </p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/vendor/chart.umd.js"></script>
+<script>
+    function usageDashboard() {
+        return {
+            loading: false,
+            empty: false,
+            lastUpdated: null,
+            presets: [
+                { label: '今天', value: 'today' },
+                { label: '近 7 天', value: '7d' },
+                { label: '近 30 天', value: '30d' },
+                { label: '近 90 天', value: '90d' },
+                { label: '近 180 天', value: '180d' },
+            ],
+            presetValue: '7d',
+            customFrom: '',
+            customTo: '',
+            granularity: 'day',
+            groupBy: 'instance',
+            barMetric: 'output_tokens',
+            barMetrics: [
+                { label: '输入', value: 'input_tokens' },
+                { label: '输出', value: 'output_tokens' },
+                { label: '缓存读', value: 'cache_read' },
+                { label: '请求', value: 'requests' },
+            ],
+            totals: {},
+            series: [],
+            groups: [],
+            trendChart: null,
+            shareChart: null,
+            groupChart: null,
+
+            async init() {
+                this.setPresetDates('7d');
+                await this.refresh();
+                setInterval(() => this.refresh(), 60000);
+            },
+
+            setPreset(value) {
+                this.presetValue = value;
+                this.setPresetDates(value);
+                this.refresh();
+            },
+
+            setPresetDates(value) {
+                const fmt = (d) => d.toISOString().slice(0, 10);
+                const now = new Date();
+                const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+                if (value === 'custom') return;
+                if (value === 'today') {
+                    this.customFrom = fmt(local(now));
+                    this.customTo = fmt(local(now));
+                } else {
+                    const days = parseInt(value);
+                    const start = new Date(now.getTime() - (days - 1) * 86400000);
+                    this.customFrom = fmt(local(start));
+                    this.customTo = fmt(local(now));
+                }
+            },
+
+            async refresh() {
+                this.loading = true;
+                try {
+                    const params = new URLSearchParams({
+                        from: this.customFrom,
+                        to: this.customTo,
+                        granularity: this.granularity,
+                    });
+                    if (this.groupBy) params.set('group_by', this.groupBy);
+                    const r = await fetch('/api/usage/summary?' + params.toString());
+                    if (!r.ok) throw new Error(await r.text());
+                    const data = await r.json();
+                    this.totals = data.totals;
+                    this.series = data.series;
+                    this.groups = data.groups;
+                    this.lastUpdated = new Date().toLocaleTimeString();
+                    this.empty = !data.series.length && !data.groups.length;
+                    this.renderTrendChart();
+                    this.renderShareChart();
+                    this.renderGroupChart();
+                } catch (e) {
+                    showToast('加载用量数据失败: ' + e.message, 'error');
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            get kpis() {
+                const t = this.totals;
+                return [
+                    { label: '请求数', value: this.fmt(t.requests || 0), hint: '成功 + 失败' },
+                    { label: '输入', value: this.fmt(t.input_tokens || 0), hint: '未命中缓存部分' },
+                    { label: '输出', value: this.fmt(t.output_tokens || 0), hint: '含推理输出' },
+                    { label: '缓存读取', value: this.fmt(t.cache_read || 0), hint: '命中前缀缓存' },
+                    { label: '缓存写入', value: this.fmt((t.cache_write || 0) + (t.cache_write_1h || 0)), hint: '含估算标记项' },
+                    { label: '缓存率', value: t.cache_rate == null ? '—' : (t.cache_rate * 100).toFixed(1) + '%', hint: '缓存读 / 全部输入' },
+                    { label: '未上报', value: this.fmt(t.unreported || 0), hint: '上游未返回 usage' },
+                ];
+            },
+
+            fmt(n) {
+                if (n == null) return '—';
+                if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + ' 亿';
+                if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(1) + ' 万';
+                return String(n);
+            },
+
+            _destroy(chart) { if (chart) { chart.destroy(); } return null; },
+
+            renderTrendChart() {
+                this.trendChart = this._destroy(this.trendChart);
+                const el = document.getElementById('trend-chart');
+                if (!el || !this.series.length) return;
+                const labels = this.series.map(s => s.label);
+                const mk = (field, label, color) => ({
+                    label,
+                    data: this.series.map(s => s[field]),
+                    backgroundColor: color,
+                    borderWidth: 0,
+                    stack: 'tokens',
+                });
+                this.trendChart = new Chart(el, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            mk('input_tokens', '输入', 'rgba(249, 115, 22, 0.55)'),
+                            mk('output_tokens', '输出', 'rgba(20, 184, 166, 0.55)'),
+                            mk('cache_read', '缓存读', 'rgba(99, 102, 241, 0.5)'),
+                            mk('cache_write', '缓存写', 'rgba(234, 179, 8, 0.45)'),
+                        ],
+                    },
+                    options: {
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+                        scales: {
+                            x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+                            y: { stacked: true, ticks: { font: { size: 10 } }, beginAtZero: true },
+                        },
+                    },
+                });
+            },
+
+            renderShareChart() {
+                this.shareChart = this._destroy(this.shareChart);
+                const el = document.getElementById('share-chart');
+                const t = this.totals;
+                const values = [t.input_tokens || 0, t.output_tokens || 0, t.cache_read || 0,
+                                (t.cache_write || 0) + (t.cache_write_1h || 0)];
+                if (!el || !values.some(v => v > 0)) return;
+                this.shareChart = new Chart(el, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['输入', '输出', '缓存读', '缓存写'],
+                        datasets: [{
+                            data: values,
+                            backgroundColor: ['#F97316', '#14B8A6', '#6366F1', '#EAB308'],
+                            borderWidth: 0,
+                        }],
+                    },
+                    options: {
+                        maintainAspectRatio: false,
+                        cutout: '62%',
+                        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+                    },
+                });
+            },
+
+            renderGroupChart() {
+                this.groupChart = this._destroy(this.groupChart);
+                const el = document.getElementById('group-chart');
+                if (!el || !this.groups.length) return;
+                const metric = this.barMetrics.find(m => m.value === this.barMetric);
+                this.groupChart = new Chart(el, {
+                    type: 'bar',
+                    data: {
+                        labels: this.groups.map(g => g.key),
+                        datasets: [{
+                            label: metric ? metric.label : this.barMetric,
+                            data: this.groups.map(g => g[this.barMetric] || 0),
+                            backgroundColor: 'rgba(249, 115, 22, 0.7)',
+                            borderRadius: 6,
+                        }],
+                    },
+                    options: {
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { x: { ticks: { font: { size: 10 } } }, y: { beginAtZero: true, ticks: { font: { size: 10 } } } },
+                    },
+                });
+            },
+        };
+    }
+</script>
+{% endblock %}
