@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>CC Convert 桌面版</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/desktop/vendor/universal-ui/tokens.css">
+    <link rel="stylesheet" href="/static/desktop/vendor/universal-ui/core.css">
+    <link rel="stylesheet" href="/static/desktop/vendor/universal-ui/motion.css">
+    <link rel="stylesheet" href="/static/desktop/css/app.css">
+</head>
+<body>
+    <div class="ui-shell">
+        <aside class="ui-sidebar" aria-label="CC Convert 导航">
+            <div class="ui-sidebar__brand">CC Convert</div>
+            <nav class="ui-sidebar__nav" id="sideNav">
+                <div class="ui-sidebar__section">导航</div>
+                <button type="button" class="ui-nav-item" data-route="/">仪表板</button>
+                <button type="button" class="ui-nav-item" data-route="/usage">用量统计</button>
+                <div class="ui-sidebar__section">管理</div>
+                <button type="button" class="ui-nav-item" data-route="/ports">端口管理</button>
+                <button type="button" class="ui-nav-item" data-route="/logs">日志查看</button>
+                <button type="button" class="ui-nav-item" data-route="/api-test">API 测试</button>
+                <button type="button" class="ui-nav-item" data-route="/global">全局设置</button>
+            </nav>
+            <div class="desktop-sidebar-footer">
+                <span class="ui-status" id="managerStatus"><span class="ui-status__dot"></span>连接中…</span>
+            </div>
+        </aside>
+
+        <header class="ui-topbar">
+            <button type="button" class="ui-icon-button" id="navTrigger" aria-haspopup="dialog" aria-controls="navSheet" aria-label="打开导航">
+                <svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+            </button>
+            <span class="ui-topbar__brand">CC Convert</span>
+            <span class="desktop-topbar-spacer"></span>
+            <button type="button" class="ui-icon-button" id="themeToggle" aria-label="切换主题">
+                <svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1v12a6 6 0 010-12z"/></svg>
+            </button>
+        </header>
+
+        <main class="ui-main">
+            <header class="ui-page-header">
+                <div>
+                    <h1 id="pageTitle">仪表板</h1>
+                    <p id="pageSubtitle">监控和管理你的 CC Convert 代理实例</p>
+                </div>
+                <div class="ui-cluster" id="pageActions"></div>
+            </header>
+            <div id="view" class="desktop-view" aria-live="polite"></div>
+        </main>
+    </div>
+
+    <!-- Mobile navigation sheet -->
+    <dialog id="navSheet" class="ui-sheet">
+        <div class="ui-sheet__body">
+            <h2 class="ui-sheet__title">导航</h2>
+            <nav class="ui-sidebar__nav" id="sheetNav">
+                <button type="button" class="ui-nav-item" data-route="/">仪表板</button>
+                <button type="button" class="ui-nav-item" data-route="/usage">用量统计</button>
+                <button type="button" class="ui-nav-item" data-route="/ports">端口管理</button>
+                <button type="button" class="ui-nav-item" data-route="/logs">日志查看</button>
+                <button type="button" class="ui-nav-item" data-route="/api-test">API 测试</button>
+                <button type="button" class="ui-nav-item" data-route="/global">全局设置</button>
+            </nav>
+            <button type="button" class="ui-button" data-ui-close>关闭</button>
+        </div>
+    </dialog>
+
+    <div class="ui-toast-stack" id="toastStack" aria-live="polite"></div>
+
+    <script src="/static/desktop/vendor/chart.umd.js"></script>
+    <script type="module" src="/static/desktop/js/app.js"></script>
+</body>
+</html>

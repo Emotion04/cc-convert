@@ -232,6 +232,17 @@ async def usage_page(request: Request):
     return templates.TemplateResponse(request, "usage.html")
 
 
+@web_router.get("/desktop", response_class=HTMLResponse)
+async def desktop_page(request: Request):
+    """Desktop UI shell (universal-ui SPA).
+
+    Served by the Manager itself so the page is same-origin with the API:
+    the CSRF meta token works unchanged, no CORS surface is added, and the
+    Tauri shell is just a window pointing at this URL.
+    """
+    return templates.TemplateResponse(request, "desktop.html")
+
+
 # ---------------------------------------------------------------------------
 # Token usage statistics
 # ---------------------------------------------------------------------------

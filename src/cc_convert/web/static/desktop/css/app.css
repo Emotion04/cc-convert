@@ -1,0 +1,107 @@
+/* Desktop UI — app-level styles on top of universal-ui tokens. */
+
+html, body { height: 100%; }
+
+.desktop-view { display: grid; gap: var(--ui-space-4, 16px); }
+
+.desktop-sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--ui-line);
+    font-size: 12px;
+}
+
+.desktop-topbar-spacer { flex: 1; }
+
+/* Instance cards */
+.desktop-inst-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}
+.desktop-inst-card { display: flex; flex-direction: column; gap: 10px; }
+.desktop-inst-card .ui-row { justify-content: space-between; }
+.desktop-mono { font-family: var(--ui-code-font); font-size: 12px; }
+.desktop-muted { color: var(--ui-fg-muted); font-size: 12px; }
+.desktop-keyval { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.desktop-keyval > span:first-child { color: var(--ui-fg-muted); }
+.desktop-keyval > span:last-child {
+    color: var(--ui-fg-secondary);
+    font-family: var(--ui-code-font);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Status dots (running/stopped/error) */
+.desktop-dot { width: 10px; height: 10px; border-radius: 9999px; display: inline-block; }
+.desktop-dot--running { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.5); }
+.desktop-dot--stopped { background: var(--ui-fg-muted); opacity: 0.4; }
+.desktop-dot--error { background: #ef4444; }
+
+/* Forms */
+.desktop-form { display: grid; gap: 18px; max-width: 640px; }
+.desktop-form label.desktop-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ui-fg-secondary);
+    margin-bottom: 6px;
+}
+.desktop-hint { font-size: 11px; color: var(--ui-fg-muted); margin-top: 4px; line-height: 1.6; }
+.desktop-row { display: flex; gap: 8px; align-items: center; }
+.desktop-row > .ui-input { flex: 1; }
+
+/* KPI cards */
+.desktop-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+/* Tables */
+.desktop-table-wrap { overflow-x: auto; }
+table.desktop-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.desktop-table th, table.desktop-table td {
+    text-align: right;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--ui-line);
+    white-space: nowrap;
+}
+table.desktop-table th:first-child, table.desktop-table td:first-child { text-align: left; }
+table.desktop-table th { color: var(--ui-fg-muted); font-weight: 500; font-size: 11px; }
+
+/* Charts */
+.desktop-chart-box { position: relative; height: 280px; }
+
+/* Log viewer */
+.desktop-log {
+    font-family: var(--ui-code-font);
+    font-size: 12px;
+    line-height: 1.7;
+    background: var(--ui-surface-muted, #111);
+    border-radius: var(--ui-radius-sm, 8px);
+    padding: 14px;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--ui-fg-secondary);
+}
+.desktop-log .log-ERROR { color: #ef4444; }
+.desktop-log .log-WARNING { color: #f59e0b; }
+.desktop-log .log-INFO { color: #10b981; }
+.desktop-log .log-DEBUG { color: var(--ui-fg-muted); }
+
+/* Copy config popover content */
+.desktop-cmd {
+    display: block;
+    background: #0c0c0c;
+    color: #5eead4;
+    padding: 8px;
+    border-radius: 8px;
+    font-family: var(--ui-code-font);
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0 0 8px;
+}

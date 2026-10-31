@@ -1,0 +1,144 @@
+:root {
+  color-scheme: light;
+  --ui-bg: #f4f4f6;
+  --ui-surface: #ffffff;
+  --ui-surface-raised: #f9f9fb;
+  --ui-surface-muted: #f1f1f4;
+  --ui-surface-hover: #e9e9ee;
+  --ui-line: #e3e3e8;
+  --ui-line-soft: #ececf0;
+  --ui-fg: #1c1c21;
+  --ui-fg-secondary: #4b4b53;
+  --ui-fg-muted: #85858d;
+  --ui-fg-faint: #b9b9c2;
+  --ui-control-fg: #63636b;
+  --ui-accent: #4f46e5;
+  --ui-accent-soft: #eeedfd;
+  --ui-accent-fg: #ffffff;
+  --ui-success: #189a58;
+  --ui-success-soft: #e4f6ec;
+  --ui-danger: #d64545;
+  --ui-danger-soft: #fbe9e9;
+  --ui-warning: #b45309;
+  --ui-warning-soft: #fbf0df;
+  /* ---- type scale -------------------------------------------------------
+     A consumer retunes density here, not per component. Every text size in
+     the kit resolves to one of these. */
+  --ui-text-xs: 11px;
+  --ui-text-sm: 12px;
+  --ui-text-base: 13px;
+  --ui-text-md: 14px;
+  --ui-text-lg: 16px;
+  --ui-text-xl: 20px;
+  --ui-text-2xl: 26px;
+
+  --ui-leading-tight: 1.25;
+  --ui-leading-normal: 1.45;
+  --ui-leading-relaxed: 1.6;
+
+  --ui-weight-normal: 400;
+  --ui-weight-medium: 550;
+  --ui-weight-bold: 650;
+
+  /* ---- spacing scale ----------------------------------------------------
+     4px rhythm with 2px steps at the small end, where optical adjustments
+     matter more than the grid. */
+  --ui-space-1: 2px;
+  --ui-space-2: 4px;
+  --ui-space-3: 6px;
+  --ui-space-4: 8px;
+  --ui-space-5: 10px;
+  --ui-space-6: 12px;
+  --ui-space-7: 14px;
+  --ui-space-8: 16px;
+  --ui-space-9: 20px;
+  --ui-space-10: 24px;
+  --ui-space-12: 32px;
+
+  --ui-radius-sm: 6px;
+  --ui-radius-md: 10px;
+  --ui-radius-lg: 14px;
+  --ui-radius-pill: 999px;
+  --ui-shadow: 0 16px 44px rgb(20 22 30 / 16%), 0 2px 8px rgb(20 22 30 / 6%), 0 0 0 .5px rgb(20 22 30 / 10%);
+  --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --ui-code-font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ui-focus: 0 0 0 3px rgb(79 70 229 / 26%);
+  /* Select chevron, drawn per theme: a background image cannot read a token,
+     so the arrow colour lives here instead of in the component layer. */
+  --ui-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%2385858d' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* ---- elevation / stacking -------------------------------------------- */
+  --ui-shadow-sm: 0 1px 2px rgb(20 22 30 / 6%);
+
+  --ui-z-base: 0;
+  --ui-z-sticky: 10;
+  --ui-z-popover: 20;
+  --ui-z-modal: 40;
+  --ui-z-toast: 50;
+}
+
+/* The dark palette. Declared twice: once for an explicit override via
+   setTheme('dark'), once for the OS preference. `system` (no attribute) must
+   follow the media query, and `light` must be able to pin the light theme on
+   a dark system — hence :not([data-ui-theme="light"]).
+   KEEP THE TWO BLOCKS IN SYNC — every declaration in one is in the other. */
+:root[data-ui-theme="dark"] {
+  color-scheme: dark;
+  --ui-bg: #1a1a1e;
+  --ui-surface: #232327;
+  --ui-surface-raised: #1f1f23;
+  --ui-surface-muted: #2d2d33;
+  --ui-surface-hover: #36363d;
+  --ui-line: #333339;
+  --ui-line-soft: #2c2c32;
+  --ui-fg: #ededf1;
+  --ui-fg-secondary: #b9b9c1;
+  --ui-fg-muted: #8b8b94;
+  --ui-fg-faint: #56565f;
+  --ui-control-fg: #a1a1aa;
+  --ui-accent: #a5b4fc;
+  --ui-accent-soft: #2b2c47;
+  --ui-accent-fg: #14142a;
+  --ui-success: #6fd99b;
+  --ui-success-soft: #1e3a2b;
+  --ui-danger: #f28b82;
+  --ui-danger-soft: #45272a;
+  --ui-warning: #f2b544;
+  --ui-warning-soft: #3f3220;
+  --ui-focus: 0 0 0 3px rgb(165 180 252 / 28%);
+  --ui-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%238b8b94' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-ui-theme="light"]) {
+    color-scheme: dark;
+    --ui-bg: #1a1a1e;
+    --ui-surface: #232327;
+    --ui-surface-raised: #1f1f23;
+    --ui-surface-muted: #2d2d33;
+    --ui-surface-hover: #36363d;
+    --ui-line: #333339;
+    --ui-line-soft: #2c2c32;
+    --ui-fg: #ededf1;
+    --ui-fg-secondary: #b9b9c1;
+    --ui-fg-muted: #8b8b94;
+    --ui-fg-faint: #56565f;
+    --ui-control-fg: #a1a1aa;
+    --ui-accent: #a5b4fc;
+    --ui-accent-soft: #2b2c47;
+    --ui-accent-fg: #14142a;
+    --ui-success: #6fd99b;
+    --ui-success-soft: #1e3a2b;
+    --ui-danger: #f28b82;
+    --ui-danger-soft: #45272a;
+    --ui-warning: #f2b544;
+    --ui-warning-soft: #3f3220;
+    --ui-focus: 0 0 0 3px rgb(165 180 252 / 28%);
+    --ui-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%238b8b94' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+}
+
+:root[data-ui-contrast="high"] {
+  --ui-line: var(--ui-fg-muted);
+  --ui-line-soft: var(--ui-fg-muted);
+  --ui-fg-secondary: var(--ui-fg);
+}

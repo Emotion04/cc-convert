@@ -1,0 +1,538 @@
+@import url("./tokens.css");
+@import url("./motion.css");
+
+*, *::before, *::after { box-sizing: border-box; }
+/* Author styles outrank the UA rule for [hidden]. Any component that sets
+   `display` would therefore stay visible when hidden — which is how a closed
+   dialog kept rendering. Make the attribute authoritative once, everywhere. */
+[hidden] { display: none !important; }
+html { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-fg); }
+body { margin: 0; min-width: 280px; background: var(--ui-bg); color: var(--ui-fg); font-size: var(--ui-text-md); line-height: 1.45; }
+button, input, select, textarea { font: inherit; }
+button { color: inherit; }
+:focus-visible { outline: 0; box-shadow: var(--ui-focus); }
+
+/* Text selection and form placeholders are part of the surface: left to the
+   engine they stay the browser default and read as foreign in a dark theme. */
+::selection { background: var(--ui-accent-soft); color: var(--ui-fg); }
+::placeholder { color: var(--ui-fg-faint); opacity: 1; }
+/* Native checks, radios and range fills pick this up where the kit does not
+   draw them itself. */
+:root { accent-color: var(--ui-accent); }
+
+/* A shell scrolls; a component inside it must not chain its scroll to the page. */
+html, body { overscroll-behavior: none; }
+.ui-scroll, .ui-panel__body, .ui-sheet__body, .ui-command__list { overscroll-behavior: contain; }
+
+/* Notches and rounded corners on portable shells. */
+.ui-shell { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+.ui-toast-stack { right: calc(18px + env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); }
+
+/* ---- icon --------------------------------------------------------------
+   Icons are inline SVG sized by the text they sit next to; `em` keeps them in
+   proportion when a component changes size. */
+.ui-icon { display: inline-block; width: 1em; height: 1em; flex: none; vertical-align: -.125em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ui-icon--sm { width: .875em; height: .875em; }
+.ui-icon--lg { width: 1.25em; height: 1.25em; }
+
+/* ---- link --------------------------------------------------------------- */
+.ui-link { color: var(--ui-accent); text-decoration: none; cursor: pointer; border-radius: var(--ui-radius-sm); transition: color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ui-link:visited { color: var(--ui-accent); }
+
+/* ---- text utilities ----------------------------------------------------- */
+/* `start`/`end` are direction-relative: in LTR they read as left/right, and
+   they keep working if the document direction ever changes. For a value that
+   is intentionally physical (a right-aligned number column) use `text-align:
+   right` directly rather than the utility. */
+.ui-text-start { text-align: start; }
+.ui-text-center { text-align: center; }
+.ui-text-end { text-align: end; }
+.ui-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-clamp-2 { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+
+/* ---- platform adaptations ----------------------------------------------
+   Windows High Contrast ignores most author colours and draws its own; the
+   borders and focus ring must survive that, so they are re-declared in system
+   colours. Without this, controls lose their outline entirely. */
+@media (forced-colors: active) {
+  .ui-button, .ui-input, .ui-select, .ui-textarea, .ui-card, .ui-dialog, .ui-sheet, .ui-popover, .ui-menu, .ui-panel, .ui-tile, .ui-command__list { border: 1px solid CanvasText; }
+  .ui-button--primary, .ui-button--danger { background: Highlight; color: HighlightText; }
+  .ui-badge, .ui-chip { border: 1px solid CanvasText; }
+  .ui-thumb { border: 1px solid Highlight; background: transparent; }
+  :focus-visible { outline: 2px solid Highlight; outline-offset: 1px; box-shadow: none; }
+  .ui-switch::after { background: CanvasText; }
+  .ui-meter__bar, .ui-ring { forced-color-adjust: none; }
+}
+
+@media (prefers-contrast: more) {
+  :root { --ui-line: var(--ui-fg-muted); --ui-line-soft: var(--ui-fg-muted); --ui-fg-muted: var(--ui-fg-secondary); }
+}
+
+.ui-shell { min-height: 100vh; display: grid; grid-template-columns: 232px minmax(0, 1fr); }
+/* Compact-shell navigation: the hamburger bar that replaces the sidebar below
+   the shell breakpoint. Desktop never renders it. */
+.ui-topbar { display: none; }
+.ui-sidebar { display: flex; flex-direction: column; gap: var(--ui-space-5); padding: var(--ui-space-8) var(--ui-space-6); border-right: 1px solid var(--ui-line); background: var(--ui-surface); }
+.ui-sidebar__brand { padding: var(--ui-space-4) var(--ui-space-5) var(--ui-space-8); color: var(--ui-fg); font-weight: 700; letter-spacing: -.02em; }
+.ui-sidebar__nav { display: grid; gap: var(--ui-space-1); }
+.ui-sidebar__section { padding: var(--ui-space-7) var(--ui-space-5) var(--ui-space-2); color: var(--ui-fg-muted); font-size: var(--ui-text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.ui-nav-item { display: flex; align-items: center; gap: var(--ui-space-4); min-height: 36px; padding: 0 var(--ui-space-5); border: 0; border-radius: var(--ui-radius-sm); background: transparent; color: var(--ui-control-fg); text-align: left; cursor: pointer; transition: background-color var(--ui-duration-standard) var(--ui-ease-standard), color var(--ui-duration-standard) var(--ui-ease-standard), transform var(--ui-duration-press) var(--ui-ease-standard); }
+.ui-nav-item:hover { background: var(--ui-surface-muted); color: var(--ui-fg); }
+.ui-nav-item[aria-current="page"] { background: var(--ui-accent-soft); color: var(--ui-accent); }
+.ui-nav-item:active { transform: scale(.98); }
+
+/* ---- sub-navigation ------------------------------------------------------
+   The secondary list that hangs under a sidebar entry. Its structure is the
+   point: a 1px rail down the left (the faint line) and items that sit against
+   it, so the hierarchy reads without indentation boxes. */
+.ui-subnav { position: relative; display: flex; flex-direction: column; gap: 1px; margin: var(--ui-space-1) 0 var(--ui-space-3) var(--ui-space-8); padding-left: var(--ui-space-4); }
+.ui-subnav::before { position: absolute; left: 0; top: 3px; bottom: 3px; width: 1px; background: var(--ui-line); content: ""; }
+.ui-subnav__item { position: relative; z-index: 1; display: flex; align-items: center; gap: var(--ui-space-3); min-height: 26px; padding: 0 var(--ui-space-5); border: 0; border-radius: 6px; background: transparent; color: var(--ui-control-fg); font-size: 12.5px; /* optical size between --ui-text-xs and --ui-text-sm; audited allowlist */ text-align: left; white-space: nowrap; cursor: pointer; transition: color var(--ui-duration-standard) var(--ui-ease-standard), background-color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-subnav__item:hover { background: var(--ui-surface-muted); color: var(--ui-fg); }
+.ui-subnav__item[aria-current="page"] { background: var(--ui-accent-soft); color: var(--ui-accent); }
+.ui-subnav__item em { margin-left: auto; color: var(--ui-fg-muted); font-size: var(--ui-text-xs); font-style: normal; font-variant-numeric: tabular-nums; }
+.ui-main { min-width: 0; padding: var(--ui-space-12) clamp(var(--ui-space-8), 4vw, 56px); }
+.ui-page-header { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-8); margin-bottom: var(--ui-space-10); }
+.ui-page-header h1 { margin: 0; font-size: clamp(22px, 3vw, 30px); letter-spacing: -.035em; }
+.ui-page-header p { margin: var(--ui-space-2) 0 0; color: var(--ui-fg-muted); }
+.ui-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--ui-space-7); }
+.ui-card { border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); box-shadow: var(--ui-shadow-sm); }
+.ui-card__header, .ui-card__body, .ui-card__footer { padding: var(--ui-space-8) var(--ui-space-8); }
+.ui-card__header + .ui-card__body, .ui-card__body + .ui-card__footer { border-top: 1px solid var(--ui-line-soft); }
+.ui-card__header h2 { margin: 0; font-size: var(--ui-text-md); }
+.ui-card__header p { margin: var(--ui-space-2) 0 0; color: var(--ui-fg-muted); font-size: var(--ui-text-base); }
+.ui-button, .ui-icon-button { border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-surface); color: var(--ui-fg-secondary); cursor: pointer; transition: background-color var(--ui-duration-standard) var(--ui-ease-standard), border-color var(--ui-duration-standard) var(--ui-ease-standard), color var(--ui-duration-standard) var(--ui-ease-standard), box-shadow var(--ui-duration-standard) var(--ui-ease-standard), transform var(--ui-duration-press) var(--ui-ease-standard); }
+.ui-button { min-height: 36px; padding: 0 var(--ui-space-6); }
+.ui-button:hover, .ui-icon-button:hover { border-color: var(--ui-accent); background: var(--ui-surface-hover); color: var(--ui-fg); }
+.ui-button:active, .ui-icon-button:active { transform: scale(.96); }
+.ui-button--primary { border-color: var(--ui-accent); background: var(--ui-accent); color: var(--ui-accent-fg); }
+.ui-button--danger { border-color: var(--ui-danger); background: var(--ui-danger); color: #fff; }
+/* Variants must outrank `.ui-button:hover` (0,2,0), or hovering collapses the
+   fill back to the default hover style. The nudge toward the text colour gives
+   filled buttons their own hover feedback instead of borrowing the outline one. */
+.ui-button.ui-button--primary:not(:disabled):hover { border-color: var(--ui-accent); background: color-mix(in srgb, var(--ui-accent) 90%, var(--ui-accent-fg)); color: var(--ui-accent-fg); }
+.ui-button.ui-button--danger:not(:disabled):hover { border-color: var(--ui-danger); background: color-mix(in srgb, var(--ui-danger) 90%, #fff); color: #fff; }
+.ui-button--sm { min-height: 28px; padding: 0 var(--ui-space-4); font-size: var(--ui-text-sm); }
+.ui-button--lg { min-height: 42px; padding: 0 var(--ui-space-8); font-size: var(--ui-text-md); }
+/* Busy state: the label is hidden but still occupies its space, so the button
+   does not shrink and the row does not reflow when the request starts. */
+.ui-button--loading { position: relative; color: transparent; pointer-events: none; }
+.ui-button--loading::after { position: absolute; inset: 0; width: 14px; height: 14px; margin: auto; border: 2px solid var(--ui-fg-muted); border-top-color: transparent; border-radius: 50%; animation: ui-spin .7s linear infinite; content: ""; }
+.ui-button--primary.ui-button--loading::after { border-color: var(--ui-accent-fg); border-top-color: transparent; }
+.ui-button:disabled, .ui-icon-button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
+.ui-icon-button { display: inline-grid; width: 36px; height: 36px; padding: 0; place-items: center; }
+.ui-field { display: grid; gap: var(--ui-space-3); }
+.ui-field label { color: var(--ui-fg-secondary); font-size: var(--ui-text-sm); font-weight: 600; }
+.ui-input, .ui-select { min-height: 38px; width: 100%; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-surface); color: var(--ui-fg); padding: 0 var(--ui-space-5); }
+.ui-input--sm { min-height: 30px; padding: 0 var(--ui-space-4); font-size: var(--ui-text-sm); }
+.ui-input:hover, .ui-select:hover { border-color: var(--ui-control-fg); }
+.ui-input:focus-visible, .ui-select:focus-visible { border-color: var(--ui-accent); box-shadow: var(--ui-focus); outline: 0; }
+.ui-input[aria-invalid="true"] { border-color: var(--ui-danger); }
+.ui-help { color: var(--ui-fg-muted); font-size: var(--ui-text-sm); }
+/* Disabled text controls matched the enabled ones exactly; the buttons and the
+   checkbox/radio set the precedent this follows. */
+.ui-input:disabled, .ui-select:disabled, .ui-textarea:disabled { opacity: .5; cursor: not-allowed; }
+.ui-row { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-6); min-height: 52px; padding: var(--ui-space-5) var(--ui-space-6); border-bottom: 1px solid var(--ui-line-soft); }
+.ui-row:last-child { border-bottom: 0; }
+.ui-row__copy { min-width: 0; }
+.ui-row__title { color: var(--ui-fg); font-weight: 600; }
+.ui-row__subtitle { margin-top: var(--ui-space-1); color: var(--ui-fg-muted); font-size: var(--ui-text-sm); }
+.ui-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 0 var(--ui-space-4); border-radius: 999px; background: var(--ui-surface-muted); color: var(--ui-fg-secondary); font-size: var(--ui-text-sm); }
+.ui-badge--success { background: var(--ui-success-soft); color: var(--ui-success); }
+.ui-badge--danger { background: var(--ui-danger-soft); color: var(--ui-danger); }
+.ui-badge--warning { background: var(--ui-warning-soft); color: var(--ui-warning); }
+.ui-badge--accent { background: var(--ui-accent-soft); color: var(--ui-accent); }
+.ui-segmented { position: relative; display: inline-flex; gap: var(--ui-space-1); padding: var(--ui-space-1); border-radius: var(--ui-radius-md); background: var(--ui-surface-muted); }
+.ui-segmented__item { position: relative; z-index: 1; min-height: 30px; padding: 0 var(--ui-space-5); border: 0; border-radius: var(--ui-radius-sm); background: transparent; color: var(--ui-control-fg); cursor: pointer; transition: color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-segmented__item[aria-pressed="true"] { color: var(--ui-fg); }
+.ui-switch { position: relative; width: 42px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: var(--ui-line); cursor: pointer; transition: background-color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-switch::after { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--ui-surface); box-shadow: 0 1px 3px rgb(0 0 0 / 25%); content: ""; transition: transform var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-switch[aria-checked="true"] { background: var(--ui-accent); }
+.ui-switch[aria-checked="true"]::after { transform: translateX(18px); }
+.ui-switch:disabled { cursor: not-allowed; opacity: .5; }
+.ui-popover { position: fixed; z-index: var(--ui-z-popover); min-width: 190px; max-width: min(360px, calc(100vw - 24px)); padding: var(--ui-space-3); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: color-mix(in srgb, var(--ui-surface) 94%, transparent); box-shadow: var(--ui-shadow); backdrop-filter: blur(16px); animation: ui-pop-in var(--ui-duration-standard) var(--ui-ease-standard) both; }
+.ui-popover[hidden] { display: none; }
+.ui-menu-item { display: flex; width: 100%; min-height: 34px; align-items: center; border: 0; border-radius: var(--ui-radius-sm); background: transparent; color: var(--ui-fg-secondary); padding: 0 var(--ui-space-5); text-align: left; cursor: pointer; }
+.ui-menu-item:hover, .ui-menu-item[aria-checked="true"] { background: var(--ui-surface-muted); color: var(--ui-fg); }
+.ui-dialog { z-index: var(--ui-z-modal); width: min(520px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-lg); background: var(--ui-surface); color: var(--ui-fg); box-shadow: var(--ui-shadow); }
+.ui-dialog::backdrop { background: rgb(0 0 0 / 32%); backdrop-filter: blur(4px); }
+.ui-dialog__surface { padding: var(--ui-space-9); animation: ui-dialog-in 260ms var(--ui-ease-standard) both; }
+.ui-dialog__header { display: flex; align-items: start; justify-content: space-between; gap: var(--ui-space-7); }
+.ui-dialog__header h2 { margin: 0; font-size: var(--ui-text-lg); }
+.ui-dialog__body { margin-top: var(--ui-space-7); color: var(--ui-fg-secondary); }
+.ui-dialog__footer { display: flex; justify-content: end; gap: var(--ui-space-4); margin-top: var(--ui-space-9); }
+.ui-toast { position: fixed; right: 18px; bottom: 18px; z-index: var(--ui-z-toast); max-width: min(380px, calc(100vw - 36px)); padding: var(--ui-space-6) var(--ui-space-7); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); box-shadow: var(--ui-shadow); animation: ui-toast-in 260ms var(--ui-ease-standard) both; }
+@keyframes ui-pop-in { from { opacity: 0; transform: translateY(var(--ui-motion-distance-sm)) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes ui-dialog-in { from { opacity: 0; transform: translateY(var(--ui-motion-distance-md)) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes ui-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ---- utilities: stack / cluster / muted text ---------------------------- */
+.ui-stack { display: grid; gap: var(--ui-space-6); }
+.ui-stack--tight { gap: var(--ui-space-3); }
+.ui-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-space-4); }
+.ui-muted { color: var(--ui-fg-muted); }
+
+/* ---- section navigation --------------------------------------------------
+   The alternative to tabs for a long page: every section stays visible and the
+   nav reports where you are rather than switching content. It is a <nav> of
+   links, not a tablist — mixing the two produces a contradictory state where
+   one item is "selected" while all panels are on screen. */
+.ui-section-nav { display: flex; flex-wrap: wrap; gap: var(--ui-space-1); }
+.ui-section-nav__item { padding: var(--ui-space-1) var(--ui-space-5); min-height: 28px; border: 0; border-radius: var(--ui-radius-sm); background: transparent; color: var(--ui-control-fg); font-size: var(--ui-text-sm); cursor: pointer; transition: background-color var(--ui-duration-standard) var(--ui-ease-standard), color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-section-nav__item:hover { background: var(--ui-surface-muted); color: var(--ui-fg); }
+.ui-section-nav__item[aria-current="location"] { background: var(--ui-accent-soft); color: var(--ui-accent); }
+/* Anchor targets must clear the sticky header when jumped to. */
+.ui-section { scroll-margin-top: var(--ui-space-10); }
+
+/* ---- sliding thumb -------------------------------------------------------
+   One thumb per control glides to the selected option instead of every option
+   lighting up on its own. It is the same element across selections, so the
+   motion is continuous; a hidden or resized control re-places it still rather
+   than animating from a stale position. */
+.ui-thumb { position: absolute; z-index: 0; top: 0; left: 0; border-radius: 7px; background: var(--ui-surface); box-shadow: 0 1px 2px rgb(0 0 0 / 8%), 0 0 0 .5px rgb(0 0 0 / 6%); pointer-events: none; }
+.ui-thumb[data-still="true"] { transition: none; }
+
+/* ---- tabs --------------------------------------------------------------- */
+.ui-tabs { position: relative; display: flex; gap: var(--ui-space-1); padding-bottom: var(--ui-space-1); border-bottom: 1px solid var(--ui-line); }
+.ui-tab { position: relative; z-index: 1; min-height: 32px; padding: 0 var(--ui-space-5); border: 0; border-radius: 7px; background: transparent; color: var(--ui-control-fg); cursor: pointer; transition: color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-tab:hover:not([aria-selected="true"]) { color: var(--ui-fg); }
+.ui-tab[aria-selected="true"] { color: var(--ui-fg); font-weight: 550; }
+.ui-tabpanel { padding-top: var(--ui-space-8); }
+.ui-tabpanel[hidden] { display: none; }
+.ui-tabpanel:not([hidden]) { animation: ui-panel-in var(--ui-duration-panel) var(--ui-ease-standard) both; }
+@keyframes ui-panel-in { from { opacity: 0; transform: translateY(var(--ui-motion-distance-sm)); } to { opacity: 1; transform: none; } }
+
+/* ---- disclosure --------------------------------------------------------- */
+.ui-disclosure { border-bottom: 1px solid var(--ui-line-soft); }
+.ui-disclosure:last-child { border-bottom: 0; }
+.ui-disclosure__trigger { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: space-between; gap: var(--ui-space-5); padding: 0 var(--ui-space-2); border: 0; background: transparent; color: var(--ui-fg); cursor: pointer; text-align: left; }
+.ui-disclosure__trigger:hover { color: var(--ui-accent); }
+.ui-disclosure__mark { color: var(--ui-fg-muted); transition: transform var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-disclosure__trigger[aria-expanded="true"] .ui-disclosure__mark { transform: rotate(90deg); }
+.ui-disclosure__content { padding: 0 var(--ui-space-2) var(--ui-space-7); color: var(--ui-fg-secondary); animation: ui-fold-in var(--ui-duration-standard) var(--ui-ease-standard) both; }
+@keyframes ui-fold-in { from { opacity: 0; transform: translateY(calc(var(--ui-motion-distance-sm) * -1)); } to { opacity: 1; transform: none; } }
+
+/* ---- skeleton ----------------------------------------------------------- */
+.ui-skeleton { border-radius: var(--ui-radius-sm); background: linear-gradient(90deg, var(--ui-surface-muted) 25%, var(--ui-surface-hover) 37%, var(--ui-surface-muted) 63%); background-size: 400% 100%; animation: ui-shimmer 1.4s ease-in-out infinite; }
+.ui-skeleton--text { height: 12px; }
+.ui-skeleton--row { height: 34px; }
+@keyframes ui-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* ---- empty state -------------------------------------------------------- */
+.ui-empty { display: grid; place-items: center; gap: var(--ui-space-3); padding: var(--ui-space-12) var(--ui-space-8); border: 1px dashed var(--ui-line); border-radius: var(--ui-radius-md); color: var(--ui-fg-muted); text-align: center; }
+.ui-empty strong { color: var(--ui-fg-secondary); font-weight: 600; }
+
+/* ---- meter / progress --------------------------------------------------- */
+.ui-meter { display: grid; gap: var(--ui-space-3); }
+.ui-meter__track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ui-surface-muted); }
+.ui-meter__bar { height: 100%; border-radius: inherit; background: var(--ui-accent); transition: width var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-meter__bar--success { background: var(--ui-success); }
+.ui-meter__bar--danger { background: var(--ui-danger); }
+
+/* ---- tooltip ------------------------------------------------------------ */
+.ui-tooltip { position: fixed; z-index: var(--ui-z-popover); max-width: 260px; padding: var(--ui-space-3) var(--ui-space-4); border-radius: var(--ui-radius-sm); background: var(--ui-fg); color: var(--ui-surface); font-size: var(--ui-text-sm); pointer-events: none; animation: ui-fade-in var(--ui-duration-standard) var(--ui-ease-standard) both; }
+@keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---- command list ------------------------------------------------------- */
+.ui-command { display: grid; gap: var(--ui-space-3); }
+.ui-command__list { max-height: 240px; overflow: auto; padding: var(--ui-space-2); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); }
+.ui-command__item { display: flex; width: 100%; min-height: 34px; align-items: center; justify-content: space-between; gap: var(--ui-space-4); padding: 0 var(--ui-space-4); border: 0; border-radius: var(--ui-radius-sm); background: transparent; color: var(--ui-fg-secondary); cursor: pointer; text-align: left; }
+.ui-command__item:hover { background: var(--ui-surface-muted); }
+.ui-command__item[aria-selected="true"] { background: var(--ui-accent-soft); color: var(--ui-accent); }
+.ui-command__item[hidden] { display: none; }
+.ui-command__hint { color: var(--ui-fg-faint); font-size: var(--ui-text-xs); }
+
+/* ---- textarea / select --------------------------------------------------
+   Inputs above are single-line by default; these keep the same border, focus
+   ring and invalid state so a form does not end up with two visual languages. */
+.ui-textarea { min-height: 84px; width: 100%; padding: var(--ui-space-4) var(--ui-space-5); resize: vertical; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-surface); color: var(--ui-fg); font: inherit; line-height: 1.5; }
+.ui-textarea:hover { border-color: var(--ui-control-fg); }
+.ui-textarea:focus-visible { border-color: var(--ui-accent); box-shadow: var(--ui-focus); outline: 0; }
+.ui-textarea[aria-invalid="true"] { border-color: var(--ui-danger); }
+.ui-select { appearance: none; -webkit-appearance: none; padding-right: calc(var(--ui-space-5) + var(--ui-space-9)); /* room for the arrow */ background-image: var(--ui-select-arrow); background-repeat: no-repeat; background-position: right 10px center; background-size: 12px; cursor: pointer; }
+
+/* ---- radio --------------------------------------------------------------
+   Same self-drawn treatment as the checkbox: the OS control does not follow
+   the theme, so a white dot appears in dark mode. */
+.ui-radio { display: inline-flex; align-items: center; gap: var(--ui-space-4); cursor: pointer; color: var(--ui-fg-secondary); user-select: none; }
+.ui-radio input[type="radio"] { appearance: none; -webkit-appearance: none; width: 15px; height: 15px; flex: none; margin: 0; display: inline-grid; place-content: center; border: 1px solid var(--ui-fg-faint); border-radius: 50%; background: var(--ui-surface); cursor: pointer; transition: border-color var(--ui-duration-standard) var(--ui-ease-standard), background-color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-radio input[type="radio"]:hover:not(:disabled) { border-color: var(--ui-fg-muted); }
+.ui-radio input[type="radio"]:checked { border-color: var(--ui-accent); border-width: 4px; }
+.ui-radio input[type="radio"]:focus-visible { outline: 0; box-shadow: var(--ui-focus); }
+.ui-radio input[type="radio"]:disabled { opacity: .45; cursor: not-allowed; }
+.ui-radio-group { display: grid; gap: var(--ui-space-4); border: 0; padding: 0; margin: 0; }
+.ui-radio-group legend { padding: 0; margin-bottom: var(--ui-space-3); color: var(--ui-fg-secondary); font-size: var(--ui-text-sm); font-weight: 600; }
+
+/* ---- chip --------------------------------------------------------------- */
+.ui-chip { display: inline-flex; align-items: center; gap: var(--ui-space-3); min-height: 26px; padding: 0 var(--ui-space-5); border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface); color: var(--ui-fg-secondary); font-size: var(--ui-text-sm); cursor: default; transition: background-color var(--ui-duration-standard) var(--ui-ease-standard), border-color var(--ui-duration-standard) var(--ui-ease-standard), transform var(--ui-duration-press) var(--ui-ease-standard); }
+.ui-chip--action { cursor: pointer; }
+.ui-chip--action:hover { border-color: var(--ui-accent); color: var(--ui-fg); }
+.ui-chip--action:active { transform: scale(.96); }
+.ui-chip[aria-pressed="true"] { border-color: var(--ui-accent); background: var(--ui-accent-soft); color: var(--ui-accent); }
+
+/* ---- avatar ------------------------------------------------------------- */
+.ui-avatar { display: inline-grid; width: 28px; height: 28px; flex: none; place-items: center; border-radius: 50%; background: var(--ui-surface-muted); color: var(--ui-fg-secondary); font-size: var(--ui-text-xs); font-weight: 600; overflow: hidden; }
+.ui-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.ui-avatar--sm { width: 22px; height: 22px; font-size: var(--ui-text-2xs); }
+.ui-avatar--lg { width: 36px; height: 36px; font-size: var(--ui-text-base); }
+
+/* ---- copy button -------------------------------------------------------- */
+.ui-copy { position: relative; }
+.ui-copy__done { position: absolute; inset-inline-end: 0; color: var(--ui-success); font-size: var(--ui-text-xs); opacity: 0; transform: translateY(2px); transition: opacity var(--ui-duration-standard) var(--ui-ease-standard), transform var(--ui-duration-standard) var(--ui-ease-standard); pointer-events: none; }
+.ui-copy[data-copied="true"] .ui-copy__done { opacity: 1; transform: none; }
+
+/* ---- checkbox ----------------------------------------------------------
+   Drawn by the system rather than the OS, so dark mode and density match
+   the rest of the surface. The tick is an SVG mask, so it takes currentColor
+   and scales with the box. Indeterminate is a separate mark, not a checked
+   state, because "some children selected" is different information. */
+.ui-check { display: inline-flex; align-items: center; gap: var(--ui-space-4); cursor: pointer; color: var(--ui-fg-secondary); user-select: none; }
+.ui-check input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 15px; height: 15px; flex: none; margin: 0;
+  display: inline-grid; place-content: center; vertical-align: middle;
+  border: 1px solid var(--ui-fg-faint); border-radius: 4px;
+  background: var(--ui-surface); color: var(--ui-accent-fg);
+  cursor: pointer;
+  transition: background-color var(--ui-duration-standard) var(--ui-ease-standard), border-color var(--ui-duration-standard) var(--ui-ease-standard), box-shadow var(--ui-duration-standard) var(--ui-ease-standard);
+}
+.ui-check input[type="checkbox"]:hover:not(:disabled) { border-color: var(--ui-fg-muted); }
+.ui-check input[type="checkbox"]:active:not(:disabled) { transform: scale(.92); }
+.ui-check input[type="checkbox"]:checked,
+.ui-check input[type="checkbox"]:indeterminate { background: var(--ui-accent); border-color: var(--ui-accent); }
+.ui-check input[type="checkbox"]::before {
+  content: ""; width: 10px; height: 10px; background: currentColor; transform: scale(0);
+  transition: transform var(--ui-duration-standard) var(--ui-ease-emphasis);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2l2 2L8 3' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2l2 2L8 3' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.ui-check input[type="checkbox"]:checked::before { transform: scale(1); }
+.ui-check input[type="checkbox"]:indeterminate::before { transform: scale(1); width: 8px; height: 1.6px; border-radius: 1px; -webkit-mask: none; mask: none; background: currentColor; }
+.ui-check input[type="checkbox"]:focus-visible { outline: 0; box-shadow: var(--ui-focus); }
+.ui-check input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
+.ui-check:has(input:disabled) { cursor: not-allowed; color: var(--ui-fg-muted); }
+
+/* ---- toolbar / breadcrumb ----------------------------------------------- */
+.ui-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--ui-space-5); padding: var(--ui-space-5) 0; }
+.ui-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-space-3); color: var(--ui-fg-muted); font-size: var(--ui-text-sm); }
+.ui-breadcrumb a { color: inherit; text-decoration: none; }
+.ui-breadcrumb a:hover { color: var(--ui-fg); }
+.ui-breadcrumb [aria-current="page"] { color: var(--ui-fg-secondary); }
+.ui-breadcrumb__sep { color: var(--ui-fg-faint); }
+
+/* ---- stat tile / sparkline ---------------------------------------------- */
+.ui-stat { display: grid; gap: var(--ui-space-1); }
+.ui-stat__value { color: var(--ui-fg); font-size: var(--ui-text-2xl); font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.ui-stat__label { color: var(--ui-fg-muted); font-size: var(--ui-text-sm); }
+.ui-stat__delta { font-size: var(--ui-text-sm); font-variant-numeric: tabular-nums; }
+.ui-stat__delta--up { color: var(--ui-success); }
+.ui-stat__delta--down { color: var(--ui-danger); }
+.ui-sparkline { display: block; width: 100%; height: 34px; overflow: visible; }
+.ui-sparkline path.line { fill: none; stroke: var(--ui-accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ui-sparkline path.area { fill: var(--ui-accent-soft); stroke: none; }
+.ui-sparkline circle { fill: var(--ui-accent); }
+
+/* ---- slider --------------------------------------------------------------
+   The native range input is kept (keyboard, a11y for free) and only the track
+   and thumb are restyled. A fully custom slider would have to re-implement
+   Home/End/PageUp and screen-reader value announcement. */
+.ui-slider { display: grid; gap: var(--ui-space-4); }
+.ui-slider input[type="range"] { appearance: none; -webkit-appearance: none; width: 100%; height: 18px; margin: 0; background: transparent; cursor: pointer; }
+/* The filled portion comes from --ui-range-fill, which bindSlider maintains.
+   Without it the track is a flat line and the control gives no feedback about
+   where the value sits. */
+.ui-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(to right, var(--ui-accent) 0 var(--ui-range-fill, 0%), var(--ui-surface-muted) var(--ui-range-fill, 0%) 100%);
+}
+.ui-slider input[type="range"]::-moz-range-track { height: 4px; border-radius: 999px; background: var(--ui-surface-muted); }
+.ui-slider input[type="range"]::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--ui-accent); }
+.ui-slider input[type="range"]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; /* centres the 14px thumb on the 4px track */ border: 1px solid var(--ui-line); border-radius: 50%; background: var(--ui-surface); box-shadow: 0 1px 3px rgb(0 0 0 / 22%); transition: transform var(--ui-duration-press) var(--ui-ease-standard), box-shadow var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-slider input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 1px solid var(--ui-line); border-radius: 50%; background: var(--ui-surface); box-shadow: 0 1px 3px rgb(0 0 0 / 22%); }
+.ui-slider input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
+.ui-slider input[type="range"]:focus-visible { outline: 0; box-shadow: var(--ui-focus); border-radius: 999px; }
+.ui-slider input[type="range"]:disabled { opacity: .5; cursor: not-allowed; }
+.ui-slider__value { color: var(--ui-fg-muted); font-size: var(--ui-text-sm); font-variant-numeric: tabular-nums; }
+
+/* ---- menu ----------------------------------------------------------------
+   Supports the checkable variants the OS tray menus use: menuitemcheckbox and
+   menuitemradio. The check column is reserved so labels stay aligned whether
+   or not an item is checkable. */
+.ui-menu { min-width: 200px; padding: var(--ui-space-2); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+.ui-menu__item { display: flex; width: 100%; min-height: 32px; align-items: center; gap: var(--ui-space-4); padding: 0 var(--ui-space-4); border: 0; border-radius: var(--ui-radius-sm); background: transparent; color: var(--ui-fg-secondary); text-align: left; cursor: pointer; transition: background-color var(--ui-duration-standard) var(--ui-ease-standard), color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-menu__item:hover, .ui-menu__item[data-active="true"] { background: var(--ui-surface-muted); color: var(--ui-fg); }
+.ui-menu__item[aria-disabled="true"] { opacity: .45; cursor: not-allowed; background: transparent; }
+.ui-menu__check { width: 14px; flex: none; color: var(--ui-accent); opacity: 0; }
+.ui-menu__item[aria-checked="true"] .ui-menu__check { opacity: 1; }
+.ui-menu__label { flex: 1; min-width: 0; }
+.ui-menu__hint { color: var(--ui-fg-faint); font-size: var(--ui-text-xs); }
+.ui-menu__sep { height: 1px; margin: var(--ui-space-2) var(--ui-space-3); background: var(--ui-line-soft); }
+.ui-menu__group { padding: var(--ui-space-3) var(--ui-space-4) var(--ui-space-2); color: var(--ui-fg-muted); font-size: var(--ui-text-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
+
+/* ---- sheet (edge panel) -------------------------------------------------- */
+/* A native <dialog> carries UA styles: `margin: auto` centres it and a default
+   border draws a black frame. Both have to be reset or a "sheet" renders as a
+   centred modal box. */
+.ui-sheet {
+  position: fixed; z-index: var(--ui-z-modal);
+  inset: 0 0 0 auto; margin: 0;
+  width: min(420px, 100vw); max-width: none; max-height: 100%; height: 100%;
+  padding: 0; border: 0; border-inline-start: 1px solid var(--ui-line);
+  background: var(--ui-surface); color: var(--ui-fg);
+  box-shadow: var(--ui-shadow);
+  animation: ui-sheet-in var(--ui-duration-panel) var(--ui-ease-standard) both;
+}
+/* Author styles outrank UA styles, so `display` must be scoped to [open] —
+   otherwise a closed <dialog> keeps rendering and the sheet never disappears. */
+.ui-sheet[open] { display: flex; flex-direction: column; }
+.ui-sheet[data-side="left"] { inset: 0 auto 0 0; border-inline-start: 0; border-inline-end: 1px solid var(--ui-line); }
+.ui-sheet__header, .ui-sheet__body, .ui-sheet__footer { padding: var(--ui-space-8) var(--ui-space-8); }
+.ui-sheet__header { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-6); border-bottom: 1px solid var(--ui-line-soft); }
+.ui-sheet__header h2 { margin: 0; font-size: var(--ui-text-lg); }
+.ui-sheet__body { flex: 1; overflow: auto; }
+.ui-sheet__footer { border-top: 1px solid var(--ui-line-soft); }
+.ui-sheet::backdrop { background: rgb(0 0 0 / 24%); }
+@keyframes ui-sheet-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+
+/* ---- toast stack --------------------------------------------------------- */
+.ui-toast-stack { position: fixed; right: 18px; bottom: 18px; z-index: var(--ui-z-toast); display: flex; flex-direction: column; gap: var(--ui-space-4); align-items: end; pointer-events: none; }
+.ui-toast-stack > * { pointer-events: auto; }
+/* A fixed toast ignores the flex layout and every toast in the stack lands on
+   the same viewport coordinates. In-flow children restore the column. */
+.ui-toast-stack > .ui-toast { position: static; }
+.ui-toast--success { border-color: color-mix(in srgb, var(--ui-success) 45%, var(--ui-line)); }
+.ui-toast--danger { border-color: color-mix(in srgb, var(--ui-danger) 45%, var(--ui-line)); }
+
+/* ---- arm button (two-step destructive) -----------------------------------
+   A destructive action arms on the first click and cancels itself after a
+   timeout or on blur. One click never destroys anything. */
+.ui-arm { transition: background-color var(--ui-duration-standard) var(--ui-ease-standard), border-color var(--ui-duration-standard) var(--ui-ease-standard), color var(--ui-duration-standard) var(--ui-ease-standard); }
+.ui-arm[data-armed="true"] { border-color: var(--ui-danger); background: var(--ui-danger-soft); color: var(--ui-danger); }
+
+/* ---- resizer / drag sort ------------------------------------------------- */
+.ui-resizer { width: 5px; flex: none; cursor: col-resize; background: transparent; touch-action: none; }
+.ui-resizer:hover, .ui-resizer:focus-visible { background: var(--ui-accent-soft); outline: 0; }
+.ui-resizer[data-dragging="true"] { background: var(--ui-accent); }
+.ui-drag[data-dragging="true"] { opacity: .5; }
+.ui-drag[data-drop="before"] { box-shadow: inset 0 2px 0 var(--ui-accent); }
+.ui-drag[data-drop="after"] { box-shadow: inset 0 -2px 0 var(--ui-accent); }
+/* touch-action:none lets the pointer drag win over the scroll gesture, the same
+   contract .ui-resizer has; without it a touch drag scrolls the list instead. */
+.ui-drag__handle { cursor: grab; color: var(--ui-fg-faint); touch-action: none; }
+.ui-drag__handle:active { cursor: grabbing; }
+
+/* ---- scroll container ---------------------------------------------------- */
+.ui-scroll { overflow: auto; scrollbar-width: thin; scrollbar-color: var(--ui-line) transparent; }
+.ui-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.ui-scroll::-webkit-scrollbar-track { background: transparent; }
+.ui-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background-clip: content-box; background-color: var(--ui-line); }
+.ui-scroll::-webkit-scrollbar-thumb:hover { background-color: var(--ui-fg-faint); }
+
+/* ---- view ---------------------------------------------------------------
+   A top-level page. The sidebar switches these; sub-navigation inside a page
+   is a tablist. Keeping the two roles separate is what stops a sidebar click
+   from scrolling instead of navigating. */
+.ui-view { display: block; }
+.ui-view[hidden] { display: none; }
+
+/* ---- panel --------------------------------------------------------------
+   The compact surface a menu-bar / tray icon opens: content-sized, no title
+   bar, anchored to the icon. Distinct from a dialog (modal, centred) and from
+   a popover (menu-shaped). Sections stack; the footer holds the primary action. */
+.ui-panel { display: flex; width: 340px; max-width: calc(100vw - 24px); max-height: min(560px, calc(100vh - 24px)); flex-direction: column; overflow: hidden; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-lg); background: var(--ui-surface); color: var(--ui-fg); box-shadow: var(--ui-shadow); }
+.ui-panel__header { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-5); padding: var(--ui-space-6) var(--ui-space-7); border-bottom: 1px solid var(--ui-line-soft); }
+.ui-panel__title { font-size: var(--ui-text-base); font-weight: 650; }
+.ui-panel__body { flex: 1; overflow: auto; }
+.ui-panel__section { padding: var(--ui-space-5) var(--ui-space-7); border-bottom: 1px solid var(--ui-line-soft); }
+.ui-panel__section:last-child { border-bottom: 0; }
+.ui-panel__section-label { margin-bottom: var(--ui-space-3); color: var(--ui-fg-muted); font-size: var(--ui-text-xs); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
+.ui-panel__row { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-5); min-height: 30px; }
+.ui-panel__row-label { color: var(--ui-fg-secondary); font-size: var(--ui-text-base); }
+.ui-panel__value { color: var(--ui-fg); font-size: var(--ui-text-base); font-variant-numeric: tabular-nums; }
+.ui-panel__footer { display: flex; gap: var(--ui-space-4); padding: var(--ui-space-5) var(--ui-space-7); border-top: 1px solid var(--ui-line-soft); }
+.ui-panel__footer .ui-button { flex: 1; }
+.ui-panel--floating { position: fixed; z-index: var(--ui-z-popover); animation: ui-pop-in var(--ui-duration-standard) var(--ui-ease-standard) both; }
+
+/* ---- inline status ------------------------------------------------------
+   A one-line result next to the control that caused it. Text is selectable on
+   error so the message can be copied; colour alone never carries the meaning,
+   the text does. */
+.ui-status { display: inline-flex; align-items: center; gap: var(--ui-space-3); min-height: 20px; color: var(--ui-fg-muted); font-size: var(--ui-text-sm); }
+.ui-status::before { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; content: ""; opacity: 0; }
+.ui-status:not(:empty)::before { opacity: 1; }
+.ui-status--success { color: var(--ui-success); }
+.ui-status--warning { color: var(--ui-warning); }
+.ui-status--danger { color: var(--ui-danger); user-select: text; cursor: text; }
+
+/* ---- field error --------------------------------------------------------- */
+.ui-field__error { color: var(--ui-danger); font-size: var(--ui-text-sm); }
+.ui-field__error:empty { display: none; }
+
+/* ---- keyboard hint ------------------------------------------------------- */
+.ui-kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; justify-content: center; padding: 0 var(--ui-space-2); border: 1px solid var(--ui-line); border-bottom-width: 2px; border-radius: 4px; background: var(--ui-surface-raised); color: var(--ui-fg-muted); font: var(--ui-text-xs)/1 var(--ui-code-font); }
+
+/* ---- divider ------------------------------------------------------------- */
+.ui-divider { height: 1px; border: 0; margin: var(--ui-space-5) 0; background: var(--ui-line-soft); }
+.ui-divider--vertical { width: 1px; height: auto; align-self: stretch; margin: 0 var(--ui-space-4); }
+
+/* ---- tile ---------------------------------------------------------------
+   A clickable card. Distinct from a row: it carries its own heading and can be
+   arranged in a grid, which is how a picker or a landing area is built. */
+.ui-tile { display: grid; gap: var(--ui-space-2); padding: var(--ui-space-7); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); color: inherit; text-align: left; cursor: pointer; transition: border-color var(--ui-duration-standard) var(--ui-ease-standard), background-color var(--ui-duration-standard) var(--ui-ease-standard), transform var(--ui-duration-press) var(--ui-ease-standard); }
+.ui-tile:hover { border-color: var(--ui-accent); background: var(--ui-surface-raised); }
+.ui-tile:active { transform: scale(.99); }
+.ui-tile[aria-selected="true"] { border-color: var(--ui-accent); background: var(--ui-accent-soft); }
+.ui-tile__title { color: var(--ui-fg); font-size: var(--ui-text-base); font-weight: 600; }
+.ui-tile__meta { color: var(--ui-fg-muted); font-size: var(--ui-text-sm); }
+
+/* ---- loading ------------------------------------------------------------- */
+.ui-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--ui-line); border-top-color: var(--ui-accent); border-radius: 50%; animation: ui-spin .7s linear infinite; }
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+/* The global reduced-motion rule freezes any animation after one iteration,
+   which would leave a half-drawn ring that looks broken. Drop the spin and
+   show a static partial ring instead: still reads as "loading". */
+@media (prefers-reduced-motion: reduce) {
+  .ui-spinner { animation: none; border-right-color: var(--ui-accent); }
+  /* Same freeze as the spinner above; the transparent top border already leaves
+     a partial arc, so dropping the animation is enough. */
+  .ui-button--loading::after { animation: none; }
+}
+
+/* ---- alert ---------------------------------------------------------------
+   A block-level message that stays on the page until dismissed, unlike the
+   one-line status. Used for import errors, permission problems and warnings
+   that must survive the action that caused them. */
+.ui-alert { display: flex; gap: var(--ui-space-5); padding: var(--ui-space-5) var(--ui-space-6); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface-raised); color: var(--ui-fg-secondary); font-size: var(--ui-text-base); }
+.ui-alert__body { flex: 1; min-width: 0; }
+/* Must be a block: as an inline span the margin collapses and the title runs
+   straight into the message text. */
+.ui-alert__title { display: block; margin-bottom: var(--ui-space-1); color: var(--ui-fg); font-weight: 600; }
+.ui-alert--success { border-color: color-mix(in srgb, var(--ui-success) 40%, var(--ui-line)); background: var(--ui-success-soft); color: var(--ui-success); }
+.ui-alert--warning { border-color: color-mix(in srgb, var(--ui-warning) 40%, var(--ui-line)); background: var(--ui-warning-soft); color: var(--ui-warning); }
+.ui-alert--danger { border-color: color-mix(in srgb, var(--ui-danger) 40%, var(--ui-line)); background: var(--ui-danger-soft); color: var(--ui-danger); }
+.ui-alert__close { flex: none; align-self: start; padding: 0 var(--ui-space-1); border: 0; background: transparent; color: inherit; cursor: pointer; opacity: .7; }
+.ui-alert__close:hover { opacity: 1; }
+
+/* A ring communicates a bounded quantity at a glance, where a bar reads as
+   progress toward completion. Both are legitimate; this is the bounded one. */
+.ui-ring { --ui-ring-value: 0; position: relative; display: inline-grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: conic-gradient(var(--ui-accent) calc(var(--ui-ring-value) * 1%), var(--ui-surface-muted) 0); }
+.ui-ring::after { position: absolute; inset: 4px; border-radius: 50%; background: var(--ui-surface); content: ""; }
+.ui-ring__label { position: relative; z-index: 1; color: var(--ui-fg-secondary); font-size: var(--ui-text-2xs); font-variant-numeric: tabular-nums; }
+.ui-ring--success { background: conic-gradient(var(--ui-success) calc(var(--ui-ring-value) * 1%), var(--ui-surface-muted) 0); }
+.ui-ring--danger { background: conic-gradient(var(--ui-danger) calc(var(--ui-ring-value) * 1%), var(--ui-surface-muted) 0); }
+
+/* ---- screen-reader only -------------------------------------------------- */
+.ui-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+@media (max-width: 760px) {
+  .ui-shell { display: block; }
+  .ui-sidebar { display: none; }
+  /* The sidebar disappears with the grid, so the topbar is the only navigation
+     surface: it stays pinned while the page scrolls and opens the sidebar as a
+     left sheet (see .ui-sheet[data-side="left"]). */
+  .ui-topbar { position: sticky; top: 0; z-index: var(--ui-z-sticky); display: flex; align-items: center; gap: var(--ui-space-5); padding: var(--ui-space-4) var(--ui-space-6); background: var(--ui-surface); border-bottom: 1px solid var(--ui-line); }
+  .ui-topbar__brand { color: var(--ui-fg); font-weight: 700; letter-spacing: -.02em; }
+  .ui-main { padding: var(--ui-space-9) var(--ui-space-8); }
+  .ui-page-header { align-items: start; flex-direction: column; }
+}

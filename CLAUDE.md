@@ -72,8 +72,9 @@ src/cc_convert/
 ├── usage/               # Token 用量：recording 归一化 / ledger 台账 / store SQLite（usage.db）
 ├── web/
 │   ├── routes.py        # Dashboard API（实例 CRUD、端口管理、格式探测、用量汇总）
-│   ├── templates/       # Jinja2 + Alpine.js 前端页面
-│   └── static/          # 本地 vendored 前端资源（Chart.js），勿改回 CDN
+│   ├── templates/       # Jinja2 + Alpine.js 前端页面（/desktop 为 universal-ui SPA 壳）
+│   └── static/          # 本地 vendored 资源（Chart.js、desktop/ 下为 universal-ui 桌面前端）
+├── desktop-shell/       # Tauri 壳（窗口/托盘/Manager 生命周期/系统通知，见 ADR-014）
 └── utils/               # 工具函数
 ```
 
