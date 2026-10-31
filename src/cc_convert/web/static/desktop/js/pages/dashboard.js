@@ -133,7 +133,7 @@ export async function render(view, params, ctx) {
                 </div>
                 ${statusBadge(inst.status)}
             </div>
-            <div>
+            <div class="desktop-keyvals">
                 <div class="desktop-keyval"><span>上游 URL</span><span>${esc(truncateUrl(inst.upstream_base_url))}</span></div>
                 <div class="desktop-keyval"><span>目标模型</span><span>${esc(inst.target_model || '透传')}</span></div>
                 <div class="desktop-keyval"><span>API 密钥</span><span>${inst.key_configured ? '已配置' : '未设置'}</span></div>

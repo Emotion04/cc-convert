@@ -13,9 +13,7 @@ html, body { height: 100%; }
 .desktop-view .ui-card .desktop-mono,
 .desktop-view .ui-card .desktop-muted { line-height: 1.7; }
 
-/* Key-value rows inside instance cards need breathing room. */
-.desktop-keyval { margin-top: 6px; }
-.desktop-inst-card .ui-row { margin-bottom: 4px; }
+/* Instance card internals: status dot aligned with the name column. */
 .desktop-inst-card .ui-cluster { align-items: center; }
 
 .desktop-sidebar-footer {
@@ -30,14 +28,28 @@ html, body { height: 100%; }
 .desktop-inst-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 16px;
+    gap: var(--ui-space-9, 20px);
 }
-.desktop-inst-card { display: flex; flex-direction: column; gap: 10px; }
+.desktop-inst-card { display: flex; flex-direction: column; gap: var(--ui-space-7, 14px); }
 .desktop-inst-card .ui-row { justify-content: space-between; }
 .desktop-mono { font-family: var(--ui-code-font); font-size: 12px; }
 .desktop-muted { color: var(--ui-fg-muted); font-size: 12px; }
-.desktop-keyval { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
-.desktop-keyval > span:first-child { color: var(--ui-fg-muted); }
+
+/* Key-value list inside instance cards: compact variant of the framework's
+   .ui-row pattern — same alignment and roles, tighter rhythm, spacing via
+   the framework's tokens instead of ad-hoc values. */
+.desktop-keyvals { display: grid; gap: var(--ui-space-2); }
+.desktop-keyval {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--ui-space-6);
+    min-height: 26px;
+    padding: var(--ui-space-1) 0;
+    font-size: var(--ui-text-sm, 13px);
+    line-height: 1.65;
+}
+.desktop-keyval > span:first-child { color: var(--ui-fg-muted); flex: none; }
 .desktop-keyval > span:last-child {
     color: var(--ui-fg-secondary);
     font-family: var(--ui-code-font);
