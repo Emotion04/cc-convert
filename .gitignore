@@ -78,3 +78,8 @@ workspace/
 
 # Playwright screenshots
 .playwright-mcp/
+
+# Desktop shell (Tauri)
+desktop-shell/node_modules/
+desktop-shell/src-tauri/target/
+desktop-shell/src-tauri/gen/
