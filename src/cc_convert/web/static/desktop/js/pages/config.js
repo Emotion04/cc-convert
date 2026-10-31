@@ -21,6 +21,14 @@ const THINKING_HELP = [
     ['vLLM / SGLang', 'auto', '取决于所服务模型，按上游 400 表现学习'],
 ];
 
+    function thinkingNotes() {
+        try {
+            const raw = JSON.parse(document.getElementById('thinkingNotes').textContent);
+            if (Array.isArray(raw) && raw.length) return raw;
+        } catch { /* fall through to builtin */ }
+        return THINKING_HELP.map(([provider, label, summary]) => ({ provider, label, summary, source: '' }));
+    }
+
 export async function render(view, params, ctx) {
     const { toast, cleanups, navigate } = ctx;
     const instanceId = params.get('id') || null;
@@ -164,10 +172,14 @@ export async function render(view, params, ctx) {
             <div style="padding:20px; max-width:560px">
                 <h3 style="margin:0 0 10px">各厂商对历史推理的处理</h3>
                 <p class="desktop-hint">智能（auto）：使用内置规则，并在收到推理相关的 400 时自动纠正后续请求。遵循上游（upstream）：Worker 启动时真实探测上游（1~2 次极小请求），探测失败则回退到内置规则。严格规则（rules）：不探测、不学习、不纠正。仅当前轮（turn）：只回传最后一次用户输入之后的全部 assistant 消息（含多步工具调用），更早轮次丢弃。</p>
-                ${THINKING_HELP.map(([p, mode, note]) => `
+                ${thinkingNotes().map((note) => `
                 <div class="ui-card" style="margin-bottom:8px; padding:10px">
-                    <div class="desktop-split"><strong style="font-size:13px">${esc(p)}</strong><span class="ui-badge">${esc(mode)}</span></div>
-                    <p class="desktop-hint" style="margin:4px 0 0">${esc(note)}</p>
+                    <div class="desktop-split">
+                        <strong style="font-size:13px">${esc(note.provider)}</strong>
+                        <span class="ui-badge">${esc(note.label)}</span>
+                    </div>
+                    <p class="desktop-hint" style="margin:4px 0 0">${esc(note.summary)}</p>
+                    ${note.source ? `<a class="ui-link desktop-hint" href="${esc(note.source)}" target="_blank" rel="noopener">来源</a>` : ''}
                 </div>`).join('')}
                 <p class="desktop-hint">整理自各厂商公开文档（2026-10）。上游策略可能变化，以实际返回为准。</p>
                 <div class="desktop-split desktop-split--end"><button type="button" class="ui-button" data-ui-close>关闭</button></div>

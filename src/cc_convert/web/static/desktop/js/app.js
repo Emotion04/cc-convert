@@ -59,6 +59,8 @@ export async function navigate() {
 function wireShell() {
     for (const nav of [document.getElementById('sideNav'), document.getElementById('sheetNav')]) {
         nav.addEventListener('click', (e) => {
+            const external = e.target.closest('[data-href]');
+            if (external) { window.location.href = external.dataset.href; return; }
             const btn = e.target.closest('[data-route]');
             if (!btn) return;
             window.location.hash = '#' + btn.dataset.route;
@@ -84,9 +86,11 @@ async function updateManagerStatus() {
     const el = document.getElementById('managerStatus');
     try {
         const data = await api.get('/api/manager');
-        el.innerHTML = `<span class="ui-status__dot" style="background:#10b981"></span>Manager ${data.instance_count} 实例 · ${data.host}:${data.port}`;
+        el.className = 'ui-status ui-status--success';
+        el.textContent = `Manager ${data.instance_count} 实例 · ${data.host}:${data.port}`;
     } catch {
-        el.innerHTML = '<span class="ui-status__dot" style="background:#ef4444"></span>Manager 离线';
+        el.className = 'ui-status ui-status--danger';
+        el.textContent = 'Manager 离线';
     }
 }
 

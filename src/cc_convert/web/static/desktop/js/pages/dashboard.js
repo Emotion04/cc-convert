@@ -139,17 +139,21 @@ export async function render(view, params, ctx) {
                 <div class="desktop-keyval"><span>API 密钥</span><span>${inst.key_configured ? '已配置' : '未设置'}</span></div>
                 ${running ? `<div class="desktop-keyval"><span>请求 / 错误</span><span>${inst.stats?.today_requests ?? 0} / ${inst.stats?.today_errors ?? 0}</span></div>` : ''}
             </div>
-            <div class="ui-cluster" style="gap:6px">
-                <button type="button" class="ui-button ${running ? '' : 'ui-button--primary'}" data-act="toggle" data-id="${inst.id}" ${b ? 'disabled' : ''}>
-                    ${b ? (b === 'stop' ? '停止中…' : b === 'restart' ? '重启中…' : '启动中…') : running ? '停止' : '启动'}
-                </button>
-                ${running ? `<button type="button" class="ui-button" data-act="restart" data-id="${inst.id}" ${b ? 'disabled' : ''}>重启</button>` : ''}
-                <button type="button" class="ui-button" data-act="edit" data-id="${inst.id}">编辑</button>
-                <div class="ui-cluster" style="position:relative">
-                    <button type="button" class="ui-button" data-act="copy" data-id="${inst.id}">复制配置</button>
-                    ${copyPopover(inst)}
+            <div class="desktop-split">
+                <div class="ui-cluster" style="gap:6px">
+                    <button type="button" class="ui-button ui-button--danger" data-act="delete" data-id="${inst.id}">删除</button>
+                    <button type="button" class="ui-button" data-act="edit" data-id="${inst.id}">编辑</button>
+                    <div class="ui-cluster" style="position:relative">
+                        <button type="button" class="ui-button" data-act="copy" data-id="${inst.id}">复制配置</button>
+                        ${copyPopover(inst)}
+                    </div>
                 </div>
-                <button type="button" class="ui-button ui-button--danger" data-act="delete" data-id="${inst.id}" style="margin-left:auto">删除</button>
+                <div class="ui-cluster" style="gap:6px">
+                    ${running ? `<button type="button" class="ui-button" data-act="restart" data-id="${inst.id}" ${b ? 'disabled' : ''}>${b === 'restart' ? '重启中…' : '重启'}</button>` : ''}
+                    <button type="button" class="ui-button ${running ? '' : 'ui-button--primary'}" data-act="toggle" data-id="${inst.id}" ${b ? 'disabled' : ''}>
+                        ${b && b !== 'restart' ? (b === 'stop' ? '停止中…' : '启动中…') : running ? '停止' : '启动'}
+                    </button>
+                </div>
             </div>
         </div>`;
     }

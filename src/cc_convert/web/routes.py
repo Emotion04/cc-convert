@@ -240,7 +240,14 @@ async def desktop_page(request: Request):
     the CSRF meta token works unchanged, no CORS surface is added, and the
     Tauri shell is just a window pointing at this URL.
     """
-    return templates.TemplateResponse(request, "desktop.html")
+    from cc_convert.thinking_policy import PROVIDER_NOTES, policy_label
+
+    notes = [{**note, "label": policy_label(note["policy"])} for note in PROVIDER_NOTES]
+    return templates.TemplateResponse(
+        request,
+        "desktop.html",
+        {"thinking_notes": notes},
+    )
 
 
 # ---------------------------------------------------------------------------

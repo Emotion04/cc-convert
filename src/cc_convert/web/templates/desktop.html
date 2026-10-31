@@ -24,6 +24,7 @@
                 <button type="button" class="ui-nav-item" data-route="/logs">日志查看</button>
                 <button type="button" class="ui-nav-item" data-route="/api-test">API 测试</button>
                 <button type="button" class="ui-nav-item" data-route="/global">全局设置</button>
+                <button type="button" class="ui-nav-item" data-href="/docs">API 文档</button>
             </nav>
             <div class="desktop-sidebar-footer">
                 <span class="ui-status" id="managerStatus"><span class="ui-status__dot"></span>连接中…</span>
@@ -64,10 +65,13 @@
                 <button type="button" class="ui-nav-item" data-route="/logs">日志查看</button>
                 <button type="button" class="ui-nav-item" data-route="/api-test">API 测试</button>
                 <button type="button" class="ui-nav-item" data-route="/global">全局设置</button>
+                <button type="button" class="ui-nav-item" data-href="/docs">API 文档</button>
             </nav>
             <button type="button" class="ui-button" data-ui-close>关闭</button>
         </div>
     </dialog>
+
+    <script type="application/json" id="thinkingNotes">{{ thinking_notes | tojson }}</script>
 
     <div class="ui-toast-stack" id="toastStack" aria-live="polite"></div>
 

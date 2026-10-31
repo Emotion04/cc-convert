@@ -12,6 +12,17 @@ export async function render(view, params, ctx) {
         barMetric: 'output_tokens', loading: false, totals: {}, series: [], groups: [],
     };
     const charts = {};
+    function tokenColor(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888888';
+    }
+
+    const PALETTE = () => ({
+        input: tokenColor('--ui-accent'),
+        output: tokenColor('--ui-success'),
+        cacheRead: tokenColor('--ui-control-fg'),
+        cacheWrite: tokenColor('--ui-warning'),
+    });
+
 
     view.innerHTML = `
         <div class="ui-card">
@@ -135,10 +146,10 @@ export async function render(view, params, ctx) {
             charts.trend = new Chart($('#trendChart'), {
                 type: 'line',
                 data: { labels, datasets: [
-                    mk('input_tokens', '输入', 'rgba(249,115,22,.55)'),
-                    mk('output_tokens', '输出', 'rgba(20,184,166,.55)'),
-                    mk('cache_read', '缓存读', 'rgba(99,102,241,.5)'),
-                    mk('cache_write', '缓存写', 'rgba(234,179,8,.45)'),
+                    mk('input_tokens', '输入', PALETTE().input + '8C'),
+                    mk('output_tokens', '输出', PALETTE().output + '8C'),
+                    mk('cache_read', '缓存读', PALETTE().cacheRead + '80'),
+                    mk('cache_write', '缓存写', PALETTE().cacheWrite + '73'),
                 ] },
                 options: chartOpts(true),
             });
@@ -148,7 +159,7 @@ export async function render(view, params, ctx) {
         if (values.some((v) => v > 0)) {
             charts.share = new Chart($('#shareChart'), {
                 type: 'doughnut',
-                data: { labels: ['输入', '输出', '缓存读', '缓存写'], datasets: [{ data: values, backgroundColor: ['#F97316', '#14B8A6', '#6366F1', '#EAB308'], borderWidth: 0 }] },
+                data: { labels: ['输入', '输出', '缓存读', '缓存写'], datasets: [{ data: values, backgroundColor: [PALETTE().input, PALETTE().output, PALETTE().cacheRead, PALETTE().cacheWrite], borderWidth: 0 }] },
                 options: { maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } } },
             });
         }
@@ -156,7 +167,7 @@ export async function render(view, params, ctx) {
             const metricLabel = { input_tokens: '输入', output_tokens: '输出', cache_read: '缓存读', requests: '请求' }[state.barMetric] || state.barMetric;
             charts.group = new Chart($('#groupChart'), {
                 type: 'bar',
-                data: { labels: state.groups.map((g) => g.key), datasets: [{ label: metricLabel, data: state.groups.map((g) => g[state.barMetric] || 0), backgroundColor: 'rgba(249,115,22,.7)', borderRadius: 6 }] },
+                data: { labels: state.groups.map((g) => g.key), datasets: [{ label: metricLabel, data: state.groups.map((g) => g[state.barMetric] || 0), backgroundColor: PALETTE().input + 'B3', borderRadius: 6 }] },
                 options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 } } }, y: { beginAtZero: true, ticks: { font: { size: 10 } } } } },
             });
         }

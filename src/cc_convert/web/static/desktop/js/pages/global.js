@@ -41,6 +41,22 @@ export async function render(view, params, ctx) {
                 </div>
             </fieldset>
             <fieldset style="border:1px solid var(--ui-line); border-radius:10px; padding:14px; display:grid; gap:12px">
+                <legend style="font-size:12px; color:var(--ui-fg-muted)">Web 搜索执行</legend>
+                <div class="desktop-row">
+                    <div style="flex:1">
+                        <label class="desktop-label">搜索提供方</label>
+                        <select class="ui-select" id="g-websearch_provider" style="width:100%">
+                            <option value="tavily">Tavily</option>
+                            <option value="tongxiao">通晓</option>
+                        </select>
+                    </div>
+                    <div style="flex:1">
+                        <label class="desktop-label">单次请求最大工具次数</label>
+                        <input type="number" class="ui-input" id="g-websearch_max_uses" min="1" max="20">
+                    </div>
+                </div>
+            </fieldset>
+            <fieldset style="border:1px solid var(--ui-line); border-radius:10px; padding:14px; display:grid; gap:12px">
                 <legend style="font-size:12px; color:var(--ui-fg-muted)">CORS（Worker 的浏览器跨源策略）</legend>
                 <div>
                     <label class="desktop-label">允许来源（逗号分隔）</label>
@@ -60,9 +76,10 @@ export async function render(view, params, ctx) {
         settings = await api.get('/api/global');
         if (cleanups.dead) return;
         const map = {
-            'g-log_level': 'log_level', 'g-timeout': 'timeout',
-            'g-tavily_api_key': 'tavily_api_key', 'g-tavily_timeout': 'tavily_timeout', 'g-tavily_max_results': 'tavily_max_results',
-            'g-tongxiao_api_key': 'tongxiao_api_key', 'g-tongxiao_timeout': 'tongxiao_timeout', 'g-tongxiao_max_results': 'tongxiao_max_results',
+            '#g-log_level': 'log_level', '#g-timeout': 'timeout',
+            '#g-tavily_api_key': 'tavily_api_key', '#g-tavily_timeout': 'tavily_timeout', '#g-tavily_max_results': 'tavily_max_results',
+            '#g-tongxiao_api_key': 'tongxiao_api_key', '#g-tongxiao_timeout': 'tongxiao_timeout', '#g-tongxiao_max_results': 'tongxiao_max_results',
+            '#g-websearch_provider': 'websearch_provider', '#g-websearch_max_uses': 'websearch_max_uses',
         };
         for (const [sel, key] of Object.entries(map)) {
             if (settings[key] != null) $(sel).value = settings[key];
@@ -82,6 +99,8 @@ export async function render(view, params, ctx) {
             tongxiao_api_key: $('#g-tongxiao_api_key').value.trim() || undefined,
             tongxiao_timeout: Number($('#g-tongxiao_timeout').value) || undefined,
             tongxiao_max_results: Number($('#g-tongxiao_max_results').value) || undefined,
+            websearch_provider: $('#g-websearch_provider').value || undefined,
+            websearch_max_uses: Number($('#g-websearch_max_uses').value) || undefined,
             cors_origins: $('#g-cors_origins').value.split(',').map((s) => s.trim()).filter(Boolean),
             cors_credentials: $('#g-cors_credentials').checked,
         };

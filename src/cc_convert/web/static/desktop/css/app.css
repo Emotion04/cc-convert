@@ -60,9 +60,9 @@ html, body { height: 100%; }
 
 /* Status dots (running/stopped/error) */
 .desktop-dot { width: 10px; height: 10px; border-radius: 9999px; display: inline-block; }
-.desktop-dot--running { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.5); }
+.desktop-dot--running { background: var(--ui-success); box-shadow: 0 0 6px color-mix(in srgb, var(--ui-success) 50%, transparent); }
 .desktop-dot--stopped { background: var(--ui-fg-muted); opacity: 0.4; }
-.desktop-dot--error { background: #ef4444; }
+.desktop-dot--error { background: var(--ui-danger); }
 
 /* Forms */
 .desktop-form { display: grid; gap: 18px; max-width: 640px; }
@@ -113,16 +113,16 @@ table.desktop-table th { color: var(--ui-fg-muted); font-weight: 500; font-size:
     word-break: break-all;
     color: var(--ui-fg-secondary);
 }
-.desktop-log .log-ERROR { color: #ef4444; }
-.desktop-log .log-WARNING { color: #f59e0b; }
-.desktop-log .log-INFO { color: #10b981; }
+.desktop-log .log-ERROR { color: var(--ui-danger); }
+.desktop-log .log-WARNING { color: var(--ui-warning); }
+.desktop-log .log-INFO { color: var(--ui-success); }
 .desktop-log .log-DEBUG { color: var(--ui-fg-muted); }
 
 /* Copy config popover content */
 .desktop-cmd {
     display: block;
-    background: #0c0c0c;
-    color: #5eead4;
+    background: var(--ui-surface-muted);
+    color: var(--ui-fg-secondary);
     padding: 8px;
     border-radius: 8px;
     font-family: var(--ui-code-font);
@@ -158,3 +158,11 @@ table.desktop-table th { color: var(--ui-fg-muted); font-weight: 500; font-size:
 .ui-cluster > .ui-select { width: auto; min-width: 110px; }
 .desktop-row > .ui-select { width: auto; }
 .desktop-row > .ui-input[type="date"] { width: auto; min-width: 130px; }
+
+/* Neutral placeholder for empty response bodies (code styling is for code). */
+.desktop-response-empty {
+    color: var(--ui-fg-muted);
+    font-size: var(--ui-text-sm);
+    text-align: center;
+    padding: 40px 0;
+}

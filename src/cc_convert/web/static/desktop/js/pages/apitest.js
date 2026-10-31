@@ -1,4 +1,4 @@
-// API 测试：向实例端点发送请求（携带 local token），展示响应。
+// API 测试：向实例端点发送请求（携带 local token + 自定义请求头），展示响应与响应头。
 
 import { api } from '../api.js';
 import { esc } from '../helpers.js';
@@ -22,8 +22,8 @@ const PRESETS = {
 
 export async function render(view, params, ctx) {
     const { toast, cleanups } = ctx;
-    const state = { instances: [], selected: '', history: [], response: null, sending: false };
-    const request = { method: 'GET', url: '/health', body: '' };
+    const state = { instances: [], selected: '', history: [], sending: false };
+    const request = { method: 'GET', url: '/health', body: '', headers: [{ key: 'Content-Type', value: 'application/json' }] };
 
     view.innerHTML = `
         <div class="desktop-inst-grid" style="grid-template-columns: 1fr 1fr; align-items:start">
@@ -47,6 +47,13 @@ export async function render(view, params, ctx) {
                             .map(([k, l]) => `<button type="button" class="ui-button" data-preset="${k}">${l}</button>`).join('')}
                     </div>
                 </div>
+                <div>
+                    <div class="desktop-split">
+                        <label class="desktop-label" style="margin:0">自定义请求头</label>
+                        <button type="button" class="ui-button" id="btnAddHeader">添加</button>
+                    </div>
+                    <div id="headersList" class="desktop-form" style="gap:6px; margin-top:8px"></div>
+                </div>
                 <div id="bodySection">
                     <label class="desktop-label">请求体（JSON）</label>
                     <textarea class="ui-textarea desktop-mono" id="reqBody" rows="8"></textarea>
@@ -58,8 +65,16 @@ export async function render(view, params, ctx) {
                     <strong style="font-size:13px">响应</strong>
                     <span class="ui-badge" id="respStatus" hidden></span>
                 </div>
-                <pre class="desktop-cmd" id="respBody" style="max-height:380px">尚未发送请求</pre>
+                <p class="desktop-response-empty" id="respEmpty">尚未发送请求</p>
+                <pre class="desktop-cmd" id="respBody" hidden style="max-height:380px"></pre>
                 <div class="desktop-muted" id="respMeta"></div>
+                <div id="respHeadersCard" hidden>
+                    <hr class="ui-divider">
+                    <strong style="font-size:12px">响应头</strong>
+                    <div class="desktop-table-wrap"><table class="desktop-table">
+                        <tbody id="respHeadersBody"></tbody>
+                    </table></div>
+                </div>
             </div>
         </div>
 
@@ -73,7 +88,6 @@ export async function render(view, params, ctx) {
     `;
 
     const $ = (sel) => view.querySelector(sel);
-    const cleanupsLocal = cleanups;
 
     function baseUrl() {
         const inst = state.instances.find((i) => i.id === state.selected);
@@ -82,6 +96,29 @@ export async function render(view, params, ctx) {
 
     function syncBodyVisibility() {
         $('#bodySection').hidden = !($('#reqMethod').value === 'POST' || $('#reqMethod').value === 'PUT');
+    }
+
+    function renderHeaders() {
+        $('#headersList').innerHTML = request.headers.map((h, idx) => `
+            <div class="desktop-row">
+                <input type="text" class="ui-input desktop-mono" data-hkey="${idx}" placeholder="名称" value="${esc(h.key)}" style="flex:1">
+                <input type="text" class="ui-input desktop-mono" data-hval="${idx}" placeholder="值" value="${esc(h.value)}" style="flex:2">
+                <button type="button" class="ui-icon-button" data-hdel="${idx}" aria-label="删除请求头">×</button>
+            </div>`).join('');
+        syncBodyVisibility();
+    }
+
+    function readHeadersInputs() {
+        view.querySelectorAll('[data-hkey]').forEach((input) => {
+            request.headers[parseInt(input.dataset.hkey, 10)].key = input.value;
+        });
+        view.querySelectorAll('[data-hval]').forEach((input) => {
+            request.headers[parseInt(input.dataset.hval, 10)].value = input.value;
+        });
+        // Drop fully-empty rows so they don't reach the wire.
+        request.headers = request.headers.filter((h) => h.key.trim() || h.value.trim());
+        if (!request.headers.length) request.headers.push({ key: '', value: '' });
+        renderHeaders();
     }
 
     function formatJson(text) {
@@ -100,12 +137,25 @@ export async function render(view, params, ctx) {
             </tr>`).join('');
     }
 
-    cleanupsLocal.listen($('#selInstance'), 'change', () => {
+    cleanups.listen($('#selInstance'), 'change', () => {
         state.selected = $('#selInstance').value;
         $('#baseUrlHint').textContent = baseUrl() ? `目标：${baseUrl()}` : '选择实例后自动填充其地址';
     });
-    cleanupsLocal.listen($('#reqMethod'), 'change', syncBodyVisibility);
-    cleanupsLocal.listen(view, 'click', async (e) => {
+    cleanups.listen($('#reqMethod'), 'change', syncBodyVisibility);
+    cleanups.listen($('#btnAddHeader'), 'click', () => {
+        readHeadersInputs();
+        request.headers.push({ key: '', value: '' });
+        renderHeaders();
+    });
+    cleanups.listen(view, 'click', async (e) => {
+        const del = e.target.closest('[data-hdel]');
+        if (del) {
+            readHeadersInputs();
+            request.headers.splice(parseInt(del.dataset.hdel, 10), 1);
+            if (!request.headers.length) request.headers.push({ key: '', value: '' });
+            renderHeaders();
+            return;
+        }
         const presetBtn = e.target.closest('[data-preset]');
         if (presetBtn) {
             const p = PRESETS[presetBtn.dataset.preset];
@@ -122,15 +172,18 @@ export async function render(view, params, ctx) {
                 $('#reqMethod').value = item.method;
                 $('#reqUrl').value = item.url.replace(baseUrl(), '') || '/';
                 $('#reqBody').value = item.body || '';
+                request.headers = (item.headers || []).length ? item.headers.map((h) => ({ ...h })) : [{ key: '', value: '' }];
+                renderHeaders();
                 syncBodyVisibility();
             }
         }
     });
 
-    cleanupsLocal.listen($('#btnSend'), 'click', async () => {
+    cleanups.listen($('#btnSend'), 'click', async () => {
         if (state.sending) return;
         const target = baseUrl();
         if (!target) { toast('请先选择实例', 'warning'); return; }
+        readHeadersInputs();
         const method = $('#reqMethod').value;
         const path = $('#reqUrl').value;
         const bodyText = $('#reqBody').value;
@@ -139,27 +192,44 @@ export async function render(view, params, ctx) {
             options.headers['Content-Type'] = 'application/json';
             options.body = bodyText;
         }
+        for (const h of request.headers) {
+            if (h.key.trim() && h.value.trim()) options.headers[h.key.trim()] = h.value.trim();
+        }
         state.sending = true;
         $('#btnSend').disabled = true;
         const started = performance.now();
         try {
             const res = await fetch(target + path, options);
             const text = await res.text();
-            if (cleanupsLocal.dead) return;
+            if (cleanups.dead) return;
             const elapsed = Math.round(performance.now() - started);
-            state.response = { status: res.status, body: text, elapsed };
             const badge = $('#respStatus');
             badge.hidden = false;
             badge.textContent = `${res.status} · ${elapsed} ms`;
             badge.className = 'ui-badge ' + (res.ok ? 'ui-badge--success' : 'ui-badge--danger');
+            $('#respEmpty').hidden = true;
+            $('#respBody').hidden = false;
             $('#respBody').textContent = formatJson(text);
             $('#respMeta').textContent = `${new Date().toLocaleTimeString('zh-CN')} · ${method} ${target + path}`;
-            state.history.unshift({ method, url: target + path, body: bodyText, time: new Date().toLocaleTimeString('zh-CN'), status: res.status });
+            const headerRows = [...res.headers.entries()]
+                .map(([k, v]) => `<tr><td class="desktop-mono" style="text-align:left">${esc(k)}</td><td class="desktop-mono" style="text-align:left; word-break:break-all">${esc(v)}</td></tr>`)
+                .join('');
+            $('#respHeadersCard').hidden = !headerRows;
+            $('#respHeadersBody').innerHTML = headerRows;
+            state.history.unshift({
+                method, url: target + path, body: bodyText,
+                headers: request.headers.map((h) => ({ ...h })),
+                time: new Date().toLocaleTimeString('zh-CN'), status: res.status,
+            });
             state.history = state.history.slice(0, 20);
             renderHistory();
         } catch (e) {
+            if (cleanups.dead) return;
             $('#respStatus').hidden = true;
+            $('#respEmpty').hidden = true;
+            $('#respBody').hidden = false;
             $('#respBody').textContent = '请求失败：' + e.message;
+            $('#respHeadersCard').hidden = true;
         } finally {
             state.sending = false;
             $('#btnSend').disabled = false;
@@ -185,6 +255,7 @@ export async function render(view, params, ctx) {
         } catch (e) {
             console.error(e);
         }
+        renderHeaders();
         syncBodyVisibility();
     })();
 }
