@@ -12,7 +12,7 @@ export async function render(view, params, ctx) {
 
     view.innerHTML = `
         <div class="ui-card">
-            <div class="ui-row" style="flex-wrap:wrap; gap:10px">
+            <div class="ui-cluster" style="gap:10px">
                 <select class="ui-select" id="selInstance">
                     <option value="">选择实例…</option>
                 </select>

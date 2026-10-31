@@ -54,7 +54,7 @@ export async function render(view, params, ctx) {
             </div>
 
             <div class="ui-card">
-                <div class="ui-row" style="justify-content:space-between">
+                <div class="desktop-split">
                     <strong style="font-size:13px">响应</strong>
                     <span class="ui-badge" id="respStatus" hidden></span>
                 </div>

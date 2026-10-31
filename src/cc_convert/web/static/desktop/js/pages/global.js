@@ -48,7 +48,7 @@ export async function render(view, params, ctx) {
                 </div>
                 <label class="desktop-row" style="font-size:12px"><input type="checkbox" id="g-cors_credentials"> 允许携带凭据</label>
             </fieldset>
-            <div class="ui-row" style="justify-content:end; border-top:1px solid var(--ui-line); padding-top:14px">
+            <div class="desktop-split desktop-split--end" style="border-top:1px solid var(--ui-line); padding-top:14px">
                 <button type="button" class="ui-button ui-button--primary" id="btnSave">保存</button>
             </div>
         </div>

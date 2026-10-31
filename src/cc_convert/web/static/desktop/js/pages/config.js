@@ -150,7 +150,7 @@ export async function render(view, params, ctx) {
                 </div>
                 <label class="desktop-row" style="font-size:13px"><input type="checkbox" id="f-autostart" checked> <strong>自动启动</strong>&nbsp;<span class="desktop-muted">创建后自动启动实例</span></label>
 
-                <div class="ui-row" style="justify-content:space-between; border-top:1px solid var(--ui-line); padding-top:14px">
+                <div class="desktop-split" style="border-top:1px solid var(--ui-line); padding-top:14px">
                     <button type="button" class="ui-button" id="btnBack">返回仪表板</button>
                     <div class="ui-cluster">
                         <button type="button" class="ui-button" id="btnReset">重置</button>
@@ -166,11 +166,11 @@ export async function render(view, params, ctx) {
                 <p class="desktop-hint">智能（auto）：使用内置规则，并在收到推理相关的 400 时自动纠正后续请求。遵循上游（upstream）：Worker 启动时真实探测上游（1~2 次极小请求），探测失败则回退到内置规则。严格规则（rules）：不探测、不学习、不纠正。仅当前轮（turn）：只回传最后一次用户输入之后的全部 assistant 消息（含多步工具调用），更早轮次丢弃。</p>
                 ${THINKING_HELP.map(([p, mode, note]) => `
                 <div class="ui-card" style="margin-bottom:8px; padding:10px">
-                    <div class="ui-row" style="justify-content:space-between"><strong style="font-size:13px">${esc(p)}</strong><span class="ui-badge">${esc(mode)}</span></div>
+                    <div class="desktop-split"><strong style="font-size:13px">${esc(p)}</strong><span class="ui-badge">${esc(mode)}</span></div>
                     <p class="desktop-hint" style="margin:4px 0 0">${esc(note)}</p>
                 </div>`).join('')}
                 <p class="desktop-hint">整理自各厂商公开文档（2026-10）。上游策略可能变化，以实际返回为准。</p>
-                <div class="ui-row" style="justify-content:end"><button type="button" class="ui-button" data-ui-close>关闭</button></div>
+                <div class="desktop-split desktop-split--end"><button type="button" class="ui-button" data-ui-close>关闭</button></div>
             </div>
         </dialog>
     `;

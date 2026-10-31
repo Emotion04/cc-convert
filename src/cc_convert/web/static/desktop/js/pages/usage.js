@@ -15,7 +15,7 @@ export async function render(view, params, ctx) {
 
     view.innerHTML = `
         <div class="ui-card">
-            <div class="ui-row" style="flex-wrap:wrap; gap:10px">
+            <div class="ui-cluster" style="gap:10px">
                 <div class="ui-segmented" id="presets" role="group" aria-label="时间范围">
                     ${[['today', '今天'], ['7d', '近 7 天'], ['30d', '近 30 天'], ['90d', '近 90 天'], ['180d', '近 180 天']]
                         .map(([v, l]) => `<button type="button" class="ui-segmented__item" data-value="${v}" aria-pressed="${v === '7d'}">${l}</button>`).join('')}
@@ -55,7 +55,7 @@ export async function render(view, params, ctx) {
         </div>
 
         <div class="ui-card">
-            <div class="ui-row" style="justify-content:space-between">
+            <div class="desktop-split">
                 <strong style="font-size:13px">分组对比</strong>
                 <div class="ui-segmented" id="barMetrics" role="group" aria-label="指标">
                     ${[['input_tokens', '输入'], ['output_tokens', '输出'], ['cache_read', '缓存读'], ['requests', '请求']]
@@ -113,9 +113,9 @@ export async function render(view, params, ctx) {
         ];
         $('#kpis').innerHTML = kpis.map(([label, value, hint]) => `
             <div class="ui-stat">
-                <div class="ui-stat__label">${label}</div>
-                <div class="ui-stat__value">${value}</div>
-                <div class="ui-stat__hint">${hint}</div>
+                <span class="ui-stat__label">${label}</span>
+                <span class="ui-stat__value">${value}</span>
+                <span class="ui-stat__delta">${hint}</span>
             </div>`).join('');
         $('#unreportedBox').hidden = !(t.unreported > 0);
         $('#unreportedN').textContent = t.unreported ?? 0;

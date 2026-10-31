@@ -2,7 +2,21 @@
 
 html, body { height: 100%; }
 
-.desktop-view { display: grid; gap: var(--ui-space-4, 16px); }
+.desktop-view { display: grid; gap: var(--ui-space-6, 20px); }
+
+/* Our cards hold a single undivided content block, so instead of the
+   header/body/footer partitioning universal-ui expects we pad the card
+   itself (same spacing value the __body partition would apply). */
+.desktop-view .ui-card { padding: var(--ui-space-8, 16px); }
+.desktop-view .ui-card > :first-child { margin-top: 0; }
+.desktop-view .ui-card > :last-child { margin-bottom: 0; }
+.desktop-view .ui-card .desktop-mono,
+.desktop-view .ui-card .desktop-muted { line-height: 1.7; }
+
+/* Key-value rows inside instance cards need breathing room. */
+.desktop-keyval { margin-top: 6px; }
+.desktop-inst-card .ui-row { margin-bottom: 4px; }
+.desktop-inst-card .ui-cluster { align-items: center; }
 
 .desktop-sidebar-footer {
     padding: 12px 16px;
@@ -105,3 +119,30 @@ table.desktop-table th { color: var(--ui-fg-muted); font-weight: 500; font-size:
     word-break: break-all;
     margin: 0 0 8px;
 }
+
+/* Horizontal split layouts. universal-ui's .ui-row is a 52px *list row*
+   (bordered), not a layout tool — layout belongs to .ui-cluster / this. */
+.desktop-split {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.desktop-split--end { justify-content: flex-end; }
+
+/* KPI stat tiles: .ui-stat is typography-only, showcase wraps it in a card. */
+.desktop-kpis .ui-stat {
+    background: var(--ui-surface);
+    border: 1px solid var(--ui-line);
+    border-radius: var(--ui-radius-md);
+    box-shadow: var(--ui-shadow-sm);
+    padding: var(--ui-space-8);
+}
+
+/* Framework inputs default to width:100% (for form stacks); inside toolbar
+   rows that makes every control wrap onto its own line. Shrink them back. */
+.ui-cluster > .ui-input,
+.ui-cluster > .ui-select { width: auto; min-width: 110px; }
+.desktop-row > .ui-select { width: auto; }
+.desktop-row > .ui-input[type="date"] { width: auto; min-width: 130px; }

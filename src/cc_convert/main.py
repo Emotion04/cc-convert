@@ -412,6 +412,17 @@ def create_manager_app(store, supervisor) -> FastAPI:
         request.state.csrf_token = app.state.csrf_token
         return await call_next(request)
 
+    # Static assets must always revalidate: without Cache-Control the browser
+    # applies heuristic freshness (10% of asset age) and serves stale JS/CSS
+    # after an update until the heuristic expires. no-cache keeps the fast
+    # 304 path while guaranteeing freshness.
+    @app.middleware("http")
+    async def static_revalidation_middleware(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     # Exception handlers
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):

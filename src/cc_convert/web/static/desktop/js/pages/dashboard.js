@@ -15,7 +15,7 @@ export async function render(view, params, ctx) {
 
     view.innerHTML = `
         <div class="ui-card" id="mgrCard">
-            <div class="ui-row" style="justify-content:space-between">
+            <div class="desktop-split">
                 <div class="ui-cluster">
                     <strong>CC Convert Manager</strong>
                     <span class="desktop-muted desktop-mono" id="mgrInfo"></span>
@@ -51,7 +51,7 @@ export async function render(view, params, ctx) {
                     </select>
                     <p class="desktop-hint">DEBUG 会在每次请求写入缓存前缀与命中信息，仅排查时开启。修改后需要重启实例才生效。</p>
                 </div>
-                <div class="ui-row" style="justify-content:end">
+                <div class="desktop-split desktop-split--end">
                     <button type="button" class="ui-button" data-ui-close>取消</button>
                     <button type="button" class="ui-button ui-button--primary" id="setSave">保存</button>
                 </div>
@@ -122,7 +122,7 @@ export async function render(view, params, ctx) {
         const running = inst.status === 'running';
         return `
         <div class="ui-card desktop-inst-card" data-card-id="${inst.id}">
-            <div class="ui-row" style="justify-content:space-between; align-items:flex-start">
+            <div class="desktop-split" style="align-items:flex-start">
                 <div class="ui-cluster">
                     ${statusDot(inst.status)}
                     <div>
@@ -139,7 +139,7 @@ export async function render(view, params, ctx) {
                 <div class="desktop-keyval"><span>API 密钥</span><span>${inst.key_configured ? '已配置' : '未设置'}</span></div>
                 ${running ? `<div class="desktop-keyval"><span>请求 / 错误</span><span>${inst.stats?.today_requests ?? 0} / ${inst.stats?.today_errors ?? 0}</span></div>` : ''}
             </div>
-            <div class="ui-row" style="flex-wrap:wrap; gap:6px">
+            <div class="ui-cluster" style="gap:6px">
                 <button type="button" class="ui-button ${running ? '' : 'ui-button--primary'}" data-act="toggle" data-id="${inst.id}" ${b ? 'disabled' : ''}>
                     ${b ? (b === 'stop' ? '停止中…' : b === 'restart' ? '重启中…' : '启动中…') : running ? '停止' : '启动'}
                 </button>
