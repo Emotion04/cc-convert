@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from cc_convert.main import create_manager_app
+from cc_convert import __version__
 from cc_convert.profile_store import (
     InstanceProfile,
     ManagerConfig,
@@ -459,7 +460,7 @@ class TestManagerStatus:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["version"] == "0.8.0"
+        assert data["version"] == __version__
         assert isinstance(data["pid"], int)
         assert data["port"] == 9999
         assert data["instance_count"] == len(mock_store.instances)

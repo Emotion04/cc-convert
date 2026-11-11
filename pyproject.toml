@@ -1,6 +1,6 @@
 [project]
 name = "cc-convert"
-version = "0.8.0"
+version = "1.6.0a0"
 description = "A bidirectional API protocol converter between Anthropic Messages API and OpenAI API"
 readme = "README.md"
 license = { text = "Apache-2.0" }

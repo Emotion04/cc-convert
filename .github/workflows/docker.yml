@@ -19,6 +19,9 @@ env:
 
 jobs:
   build-and-push:
+    # Pre-release tags (vX.Y.Z-canary…) skip Docker: the image path is
+    # documented as unverified in docs/使用规范.md §12.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -70,6 +73,7 @@ jobs:
             VCS_REF=${{ github.sha }}
 
   build-and-push-claude-code:
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

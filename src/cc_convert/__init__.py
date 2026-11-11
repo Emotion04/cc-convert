@@ -3,7 +3,7 @@
 cc-convert: A proxy server that converts Anthropic Messages API to OpenAI API.
 """
 
-__version__ = "0.8.0"
+__version__ = "1.6.0a0"
 
 from cc_convert.protocol import (
     AnthropicError,

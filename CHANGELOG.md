@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.6.0-canary] - 2026-11-11
+
+> 预发布（canary）。PyPI 包版本为 `1.6.0a0`（PEP 440 预发布），安装：
+> `pip install --pre "cc-convert==1.6.0a0"`。桌面版为实验性，尚未进入 CI 分发。
+
+### Added
+
+- **Token 用量统计**：`/v1/messages`、`/v1/chat/completions`、`/v1/responses` 三入口全路径采集（含服务端工具循环与透传流），内存 15 分钟桶 + SQLite 持久化，请求热路径零磁盘 IO；拿不到 usage 记「未上报」，不按 0 记账
+- **用量总览面板**（`/usage`）：KPI、堆叠趋势、构成占比、分组对比与明细表（Chart.js 本地 vendored，断网可用）
+- **桌面版（实验性）**：`/desktop` 全新界面（universal-ui SPA，七页功能对齐 Web 面板，与现有界面共存）；Tauri 壳（`desktop-shell/`：窗口、托盘、Manager 生命周期、系统通知），见 `desktop-shell/README.md`
+- 流式透传为采集用量向上游请求 `include_usage`；客户端未主动要求时该 usage chunk 会被剥离，客户端可见流保持不变
+- `/static` 响应携带 `Cache-Control: no-cache`，前端更新后浏览器不再使用启发式缓存的旧资源
+
+### Fixed
+
+- 中文 Windows 下 `tasklist`/`netstat` 输出解码失败导致 `stdout` 为 `None` 的崩溃
+- 桌面 UI 间距与组件用法对齐 universal-ui 约定；全局设置页选择器笔误导致的加载失败
+
+### Docs
+
+- 新增桌面版架构决策（ADR-014）与不变量 J 组；universal-ui 组件清单/集成契约内置仓库
+- 用量统计设计/实施计划与实现同步
+
+---
+
 ## [0.8.0] - 2026-08-03
 
 ### Breaking changes (项目改名)

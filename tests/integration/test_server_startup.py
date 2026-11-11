@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 
 from cc_convert.config import Settings
+from cc_convert import __version__
 
 
 @pytest.mark.asyncio
@@ -103,7 +104,7 @@ class TestServerConfiguration:
 
     async def test_app_version(self, app: FastAPI) -> None:
         """Test app version is set correctly."""
-        assert app.version == "0.8.0"
+        assert app.version == __version__
 
     async def test_app_title(self, app: FastAPI) -> None:
         """Test app title is set correctly."""

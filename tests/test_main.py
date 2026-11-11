@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from fastapi import HTTPException
 
 from cc_convert.main import create_app, run_foreground, main
+from cc_convert import __version__
 from cc_convert.config import Settings
 
 
@@ -23,7 +24,7 @@ class TestCreateApp:
         app = create_app(settings)
 
         assert app.title == "CC Convert Proxy Worker"
-        assert app.version == "0.8.0"
+        assert app.version == __version__
         assert app.docs_url == "/docs"
         assert app.redoc_url == "/redoc"
 
