@@ -33,6 +33,10 @@ jobs:
       run: twine check dist/*
 
     - name: Publish to PyPI
+      # Optional channel: without a configured Trusted Publisher this step
+      # fails, but the Release below still carries dist/* as assets so users
+      # can install straight from GitHub. Never block the release on it.
+      continue-on-error: true
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         skip-existing: true
@@ -52,3 +56,4 @@ jobs:
         body_path: /tmp/release_notes.md
         draft: false
         prerelease: ${{ contains(github.ref_name, '-') }}
+        files: dist/*

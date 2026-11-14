@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "ccconvert-desktop"
-version = "0.1.0"
+version = "1.6.0-a0"
 dependencies = [
  "serde",
  "serde_json",

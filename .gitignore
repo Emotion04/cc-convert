@@ -83,3 +83,8 @@ workspace/
 desktop-shell/node_modules/
 desktop-shell/src-tauri/target/
 desktop-shell/src-tauri/gen/
+
+# 构建产物（PyInstaller dist、发布打包暂存）
+dist/
+dist-release/
+build/

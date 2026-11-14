@@ -3,7 +3,7 @@
 ## [1.6.0-canary] - 2026-11-11
 
 > 预发布（canary）。PyPI 包版本为 `1.6.0a0`（PEP 440 预发布），安装：
-> `pip install --pre "cc-convert==1.6.0a0"`。桌面版为实验性，尚未进入 CI 分发。
+> `pip install --pre "cc-convert==1.6.0a0"`。桌面版为实验性，安装包见本 Release 附件。
 
 ### Added
 
