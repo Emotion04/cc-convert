@@ -29,6 +29,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install build twine pyinstaller
 
+    - name: Install project (PyInstaller needs the runtime deps present)
+      # Without this the analysis silently skips every dependency:
+      # pure-Python ones vanish into nothing and binary extensions
+      # (pydantic_core, tiktoken) never reach _internal/, so the frozen
+      # app cannot start.
+      run: pip install .
+
     - name: Build package
       run: python -m build
 
