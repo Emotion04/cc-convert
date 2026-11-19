@@ -17,6 +17,7 @@ const routes = {
     '/logs': { title: '日志查看', subtitle: '查看 Manager 与实例日志', load: () => import('./pages/logs.js') },
     '/api-test': { title: 'API 测试', subtitle: '向实例端点发送测试请求', load: () => import('./pages/apitest.js') },
     '/global': { title: '全局设置', subtitle: '日志、搜索服务与代理参数', load: () => import('./pages/global.js') },
+    '/claude-configs': { title: 'Claude 配置', subtitle: '浏览 ~/.claude 下的配置文件与绑定关系', load: () => import('./pages/claudeconfigs.js') },
 };
 
 let cleanup = null;

@@ -138,6 +138,7 @@ export async function render(view, params, ctx) {
                 <div class="desktop-keyval"><span>目标模型</span><span>${esc(inst.target_model || '透传')}</span></div>
                 <div class="desktop-keyval"><span>API 密钥</span><span>${inst.key_configured ? '已配置' : '未设置'}</span></div>
                 ${running ? `<div class="desktop-keyval"><span>请求 / 错误</span><span>${inst.stats?.today_requests ?? 0} / ${inst.stats?.today_errors ?? 0}</span></div>` : ''}
+                ${inst.claude_config_path ? `<div class="desktop-keyval"><span>Claude 配置</span><span title="${esc(inst.claude_config_path)}">${esc(inst.claude_config_path.split(/[\/]/).pop())}</span></div>` : ''}
             </div>
             <div class="desktop-split">
                 <div class="ui-cluster" style="gap:6px">

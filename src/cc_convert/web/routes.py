@@ -500,6 +500,14 @@ async def create_instance(request: Request):
             data.get("thinking_history_force_manual", False)
         ),
         auto_start=bool(data.get("auto_start", True)),
+        claude_config_path=str(data.get("claude_config_path") or ""),
+        context_window=int(data.get("context_window") or 0),
+        compact_window=int(data.get("compact_window") or 0),
+        prompt_cache_ttl=str(data.get("prompt_cache_ttl") or ""),
+        subagent_cache_ttl=str(data.get("subagent_cache_ttl") or ""),
+        claude_config_use_upstream_key=bool(
+            data.get("claude_config_use_upstream_key", False)
+        ),
     )
 
     store.instances.append(instance)
@@ -820,6 +828,241 @@ async def upstream_models(request: Request):
         if isinstance(item, dict) and item.get("id")
     ]
     return {"models": models}
+
+
+@web_router.post("/api/probe-context")
+async def probe_context(request: Request):
+    """Look up a model's context window from the upstream.
+
+    Relays that expose ``/models`` sometimes include ``context_length`` /
+    ``max_context_length`` / ``context_window``. The field name is not
+    standardised, so several shapes are tried; when none is present the UI
+    keeps its manual input and offers the common presets instead.
+
+    Returns ``{found: bool, context_length: int|None, source: str}``.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON body")
+
+    url = (data.get("url") or "").strip()
+    key = (data.get("key") or "").strip()
+    model = (data.get("model") or "").strip()
+    instance_id = data.get("instance_id")
+
+    if instance_id and (not key or key.startswith("***")):
+        store = _get_store(request)
+        for inst in store.instances:
+            if inst.id == instance_id:
+                key = inst.upstream_api_key
+                url = url or inst.upstream_base_url
+                model = model or inst.target_model
+                break
+
+    if not url:
+        raise HTTPException(400, detail="url is required")
+
+    import httpx
+
+    headers = {}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+            response = await client.get(f"{url.rstrip('/')}/models", headers=headers)
+    except Exception as exc:
+        raise HTTPException(502, detail=f"{type(exc).__name__}: {exc}")
+
+    if response.status_code != 200:
+        raise HTTPException(response.status_code, detail=f"上游返回 HTTP {response.status_code}")
+    try:
+        payload = response.json()
+    except ValueError:
+        raise HTTPException(502, detail="上游返回的不是 JSON")
+
+    entries = [i for i in (payload.get("data") or []) if isinstance(i, dict)]
+    if model:
+        # Prefer the exact model; fall back to the only entry when there is one.
+        match = next((i for i in entries if i.get("id") == model), None)
+        if match is None and len(entries) == 1:
+            match = entries[0]
+        entries = [match] if match else []
+
+    for entry in entries:
+        for field in (
+            "context_length",
+            "max_context_length",
+            "context_window",
+            "max_input_tokens",
+            "max_model_len",
+        ):
+            value = entry.get(field)
+            if isinstance(value, int) and value > 0:
+                return {"found": True, "context_length": value, "source": field}
+
+    return {"found": False, "context_length": None, "source": ""}
+
+
+@web_router.get("/api/claude-configs")
+async def list_claude_configs(request: Request):
+    """Every settings file in the [CC] directory, with its bound instance."""
+    from cc_convert.claude_settings_file import claude_config_dir, list_settings_files
+
+    store = _get_store(request)
+    bound = {}
+    for inst in store.instances:
+        if inst.claude_config_path:
+            bound[str(Path(inst.claude_config_path))] = {
+                "instance_id": inst.id,
+                "instance_name": inst.name,
+            }
+
+    files = list_settings_files()
+    for item in files:
+        item["bound_to"] = bound.get(item["path"])
+    return {
+        "directory": str(claude_config_dir()),
+        "files": files,
+        "bound_count": len(bound),
+    }
+
+
+@web_router.get("/api/claude-configs/content")
+async def read_claude_config(request: Request, path: str):
+    """Return one settings file's text for the preview pane.
+
+    Only files inside the Claude directory (or explicitly absolute paths the
+    user typed while binding) are readable; this is a local admin API, but it
+    still refuses to walk arbitrary paths outside the managed location.
+    """
+    from cc_convert.claude_settings_file import claude_config_dir, resolve_path
+
+    target = resolve_path(path)
+    try:
+        resolved = target.resolve()
+    except OSError:
+        raise HTTPException(404, detail="路径无法解析")
+    allowed_root = claude_config_dir().resolve()
+    if allowed_root not in resolved.parents and resolved != allowed_root:
+        # A bound file outside ~/.claude is legitimate, but only if some
+        # instance actually points at it.
+        store = _get_store(request)
+        known = {
+            str(resolve_path(i.claude_config_path))
+            for i in store.instances
+            if i.claude_config_path
+        }
+        if str(target) not in known:
+            raise HTTPException(403, detail="仅允许读取 Claude 配置目录或已绑定的文件")
+    if not resolved.is_file():
+        raise HTTPException(404, detail="文件不存在")
+    try:
+        return {"path": str(target), "content": resolved.read_text(encoding="utf-8")}
+    except OSError as exc:
+        raise HTTPException(500, detail=f"读取失败：{exc}")
+
+
+@web_router.get("/api/instances/{instance_id}/claude-config")
+async def get_instance_claude_config(request: Request, instance_id: str):
+    """Preview the settings fragment an instance would write."""
+    from cc_convert.claude_config import render_for_instance
+
+    store = _get_store(request)
+    for inst in store.instances:
+        if inst.id == instance_id:
+            return {
+                "document": render_for_instance(
+                    inst, upstream_key=inst.claude_config_use_upstream_key
+                ),
+                "path": inst.claude_config_path,
+            }
+    raise HTTPException(404, detail="Instance not found")
+
+
+@web_router.post("/api/instances/{instance_id}/claude-config")
+async def bind_claude_config(request: Request, instance_id: str):
+    """Bind an instance to a settings file and write it.
+
+    Body: ``{path: str, create: bool}``. ``path`` may be a bare filename
+    (resolved inside the Claude directory) or an absolute path.
+    """
+    from cc_convert.claude_config import render_for_instance
+    from cc_convert.claude_settings_file import resolve_path, write_fragment
+
+    store = _get_store(request)
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON body")
+
+    raw_path = (data.get("path") or "").strip()
+    if not raw_path:
+        raise HTTPException(422, detail="path is required")
+
+    target = resolve_path(raw_path)
+    instance = next((i for i in store.instances if i.id == instance_id), None)
+    if instance is None:
+        raise HTTPException(404, detail="Instance not found")
+
+    if not data.get("create") and not target.is_file():
+        raise HTTPException(404, detail=f"配置文件不存在：{target}")
+
+    # Another instance must not silently share the same file.
+    for other in store.instances:
+        if (
+            other.id != instance_id
+            and other.claude_config_path
+            and str(resolve_path(other.claude_config_path)) == str(target)
+        ):
+            raise HTTPException(
+                409, detail=f"该配置文件已绑定到实例「{other.name}」"
+            )
+
+    document = render_for_instance(
+        instance, upstream_key=instance.claude_config_use_upstream_key
+    )
+    write_fragment(target, document)
+    instance.claude_config_path = str(target)
+    save_profile_store(store)
+    return {
+        "path": str(target),
+        "document": document,
+        "instance": _instance_to_response(instance),
+    }
+
+
+@web_router.delete("/api/instances/{instance_id}/claude-config")
+async def unbind_claude_config(
+    request: Request, instance_id: str, remove_keys: bool = True
+):
+    """Detach an instance from its settings file.
+
+    ``remove_keys`` also strips the env entries cc-convert wrote, so the file
+    does not keep pointing at a proxy instance that no longer manages it.
+    """
+    from cc_convert.claude_config import TIER_KEYS
+    from cc_convert.claude_settings_file import remove_managed_keys, resolve_path
+
+    store = _get_store(request)
+    instance = next((i for i in store.instances if i.id == instance_id), None)
+    if instance is None:
+        raise HTTPException(404, detail="Instance not found")
+
+    if instance.claude_config_path and remove_keys:
+        owned = {
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_MODEL",
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+            *(key for key, _ in TIER_KEYS),
+        }
+        remove_managed_keys(resolve_path(instance.claude_config_path), owned)
+
+    instance.claude_config_path = ""
+    save_profile_store(store)
+    return {"instance": _instance_to_response(instance)}
 
 
 @web_router.post("/api/probe-thinking")

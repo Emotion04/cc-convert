@@ -29,6 +29,42 @@ const THINKING_HELP = [
         return THINKING_HELP.map(([provider, label, summary]) => ({ provider, label, summary, source: '' }));
     }
 
+/**
+ * Minimal file picker for settings fragments. Built on <dialog> so focus
+ * trapping and Escape come from the platform rather than hand-written code.
+ */
+function showFilePicker(directory, files, onPick) {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'ui-dialog';
+    dialog.innerHTML = `
+        <div class="desktop-form" style="padding:20px; min-width:420px; max-width:560px">
+            <div>
+                <h3 style="margin:0 0 4px">选择配置文件</h3>
+                <p class="desktop-hint" style="margin:0">${directory}</p>
+            </div>
+            <div class="desktop-form" style="gap:6px; max-height:50vh; overflow:auto"></div>
+            <div class="desktop-split desktop-split--end">
+                <button type="button" class="ui-button" data-cancel>取消</button>
+            </div>
+        </div>`;
+    const list = dialog.querySelector('.desktop-form > .desktop-form');
+    for (const f of files) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ui-button';
+        btn.style.cssText = 'justify-content:flex-start;text-align:left;width:100%';
+        const bound = f.bound_to ? `　· 已绑定「${f.bound_to.instance_name}」` : '';
+        btn.innerHTML = `<span class="desktop-mono">${f.name}</span>`
+            + `<span class="desktop-muted" style="margin-left:8px">${f.base_url || '未设置 BASE_URL'}${bound}</span>`;
+        btn.addEventListener('click', () => { onPick(f); dialog.close(); });
+        list.appendChild(btn);
+    }
+    dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    document.body.appendChild(dialog);
+    dialog.showModal();
+}
+
 export async function render(view, params, ctx) {
     const { toast, cleanups, navigate } = ctx;
     const instanceId = params.get('id') || null;
@@ -50,6 +86,12 @@ export async function render(view, params, ctx) {
         thinking_history: 'auto',
         thinking_history_auto_correct: true,
         thinking_history_force_manual: false,
+        claude_config_path: '',
+        context_window: 0,
+        compact_window: 0,
+        prompt_cache_ttl: '',
+        subagent_cache_ttl: '',
+        claude_config_use_upstream_key: false,
     };
     let originalData = null;
     let thinkingCorrected = false;
@@ -160,6 +202,73 @@ export async function render(view, params, ctx) {
                 </div>
                 <label class="desktop-row" style="font-size:13px"><input type="checkbox" id="f-autostart" checked> <strong>自动启动</strong>&nbsp;<span class="desktop-muted">创建后自动启动实例</span></label>
 
+                <!-- Claude Code settings binding -->
+                <fieldset class="desktop-fieldset">
+                    <legend>Claude Code 配置</legend>
+                    <p class="desktop-hint" style="margin-top:0">
+                        生成一个最小 settings 片段，用 <code class="desktop-mono">claude --settings &lt;文件&gt;</code> 启动即可。
+                        未写入的项自动继承主 <code class="desktop-mono">settings.json</code>。
+                    </p>
+
+                    <div class="desktop-split">
+                        <label class="desktop-label" style="margin:0">上下文窗口</label>
+                        <div class="ui-cluster">
+                            <button type="button" class="ui-button" id="btnProbeCtx">探测</button>
+                            <button type="button" class="ui-button" id="btn1M">1M</button>
+                        </div>
+                    </div>
+                    <div class="desktop-row">
+                        <input type="number" class="ui-input" id="f-context" placeholder="留空则不写入（继承主配置）">
+                    </div>
+                    <p class="desktop-hint" id="ctxHint"></p>
+
+                    <div class="desktop-row" style="margin-top:14px">
+                        <div style="flex:1">
+                            <label class="desktop-label">压缩阈值</label>
+                            <input type="number" class="ui-input" id="f-compact" placeholder="留空则按上下文 97% 自动计算">
+                        </div>
+                    </div>
+                    <p class="desktop-hint" id="compactHint"></p>
+
+                    <div class="desktop-row" style="margin-top:14px">
+                        <div style="flex:1">
+                            <label class="desktop-label">主缓存 TTL</label>
+                            <select class="ui-select" id="f-ttl" style="width:100%">
+                                <option value="">不写入（继承）</option>
+                                <option value="5m">5 分钟</option>
+                                <option value="1h">1 小时</option>
+                            </select>
+                        </div>
+                        <div style="flex:1">
+                            <label class="desktop-label">子 agent 缓存 TTL</label>
+                            <select class="ui-select" id="f-subttl" style="width:100%">
+                                <option value="">不写入（继承）</option>
+                                <option value="5m">5 分钟</option>
+                                <option value="1h">1 小时</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="desktop-hint">仅 Claude 系列模型使用缓存 TTL；其他上游会忽略这两项，因此默认不写入。</p>
+
+                    <div style="margin-top:14px">
+                        <label class="desktop-label">配置文件</label>
+                        <div class="desktop-row">
+                            <input type="text" class="ui-input desktop-mono" id="f-ccpath" placeholder="例如 gguuai-claude.json（相对 ~/.claude）或绝对路径">
+                            <button type="button" class="ui-button" id="btnPickFile">选择已有</button>
+                        </div>
+                        <p class="desktop-hint" id="ccBindHint"></p>
+                        <label class="desktop-row" style="font-size:12px; margin-top:8px">
+                            <input type="checkbox" id="f-ccupstream"> 写入上游真实密钥（仅当此配置绕过代理直连上游时需要）
+                        </label>
+                    </div>
+
+                    <div class="desktop-split" style="margin-top:12px">
+                        <button type="button" class="ui-button" id="btnPreviewCC">预览生成的 JSON</button>
+                        <button type="button" class="ui-button" id="btnUnbindCC" hidden>解除绑定</button>
+                    </div>
+                    <pre class="desktop-cmd" id="ccPreview" hidden style="max-height:240px"></pre>
+                </fieldset>
+
                 <div class="desktop-split" style="border-top:1px solid var(--ui-line); padding-top:14px">
                     <button type="button" class="ui-button" id="btnBack">返回仪表板</button>
                     <div class="ui-cluster">
@@ -206,6 +315,12 @@ export async function render(view, params, ctx) {
         $('#f-autostart').checked = formData.auto_start;
         $('#f-format').value = formData.upstream_format;
         $('#f-thinking').value = formData.thinking_history;
+        $('#f-ccpath').value = formData.claude_config_path || '';
+        $('#f-context').value = formData.context_window || '';
+        $('#f-compact').value = formData.compact_window || '';
+        $('#f-ttl').value = formData.prompt_cache_ttl || '';
+        $('#f-subttl').value = formData.subagent_cache_ttl || '';
+        $('#f-ccupstream').checked = !!formData.claude_config_use_upstream_key;
         $('#f-autocorrect').checked = formData.thinking_history_auto_correct;
         $('#f-forcemanual').checked = formData.thinking_history_force_manual;
         renderDerived();
@@ -228,7 +343,31 @@ export async function render(view, params, ctx) {
             thinking_history: $('#f-thinking').value,
             thinking_history_auto_correct: $('#f-autocorrect').checked,
             thinking_history_force_manual: $('#f-forcemanual').checked,
+            claude_config_path: ($('#f-ccpath').value || '').trim(),
+            context_window: parseInt($('#f-context').value, 10) || 0,
+            compact_window: parseInt($('#f-compact').value, 10) || 0,
+            prompt_cache_ttl: $('#f-ttl').value,
+            subagent_cache_ttl: $('#f-subttl').value,
+            claude_config_use_upstream_key: $('#f-ccupstream').checked,
         };
+    }
+
+    function isDirty() {
+        if (!isEdit) {
+            // New instance: the button is only meaningful once required
+            // fields exist, so enable as soon as they are filled.
+            return !!($('#f-name').value || '').trim()
+                && !!($('#f-url').value || '').trim()
+                && !!($('#f-key').value || '').trim();
+        }
+        readForm();
+        return JSON.stringify(formData) !== JSON.stringify(originalData);
+    }
+
+    function syncSaveState() {
+        const btn = $('#btnSave');
+        if (!btn || state.saving) return;
+        btn.disabled = !isDirty();
     }
 
     function renderDerived() {
@@ -247,9 +386,24 @@ export async function render(view, params, ctx) {
             p.status === 'probing' ? `探测中… 已用 ${(p.elapsed || 0).toFixed(1)}s / 20s，剩余 ${(p.remaining || 0).toFixed(1)}s`
             : p.status === 'done' ? `${p.ok ? '建议：' + p.label : '未得出结论'}${p.evidence ? ' — ' + p.evidence : ''}${p.applied ? '（已应用，下一次请求生效）' : ''}`
             : p.status === 'fail' ? p.evidence : '';
+        const ctx = parseInt($('#f-context').value, 10) || 0;
+        const compactInput = parseInt($('#f-compact').value, 10) || 0;
+        $('#ctxHint').textContent = ctx > 0
+            ? `将写入 CLAUDE_CODE_MAX_CONTEXT_TOKENS = ${ctx}`
+            : '';
+        $('#compactHint').textContent = ctx > 0
+            ? (compactInput > 0
+                ? `将写入 ${compactInput}（上下文 ${(compactInput / ctx * 100).toFixed(1)}%）`
+                : `未填则按 97% 自动写入 ${Math.floor(ctx * 0.97)}`)
+            : (compactInput > 0 ? '需先填写上下文窗口' : '');
+        $('#ccBindHint').textContent = formData.claude_config_path
+            ? `当前绑定：${formData.claude_config_path}`
+            : '留空则不生成配置文件';
+        $('#btnUnbindCC').hidden = !formData.claude_config_path;
         $('#correctedBox').hidden = !thinkingCorrected;
         $('#correctedTo').textContent = thinkingCorrectedTo;
         $('#modelOptions').innerHTML = state.availableModels.map((m) => `<option value="${esc(m)}"></option>`).join('');
+        syncSaveState();
         $('#warningsBox').hidden = saveWarnings.length === 0;
         $('#warningsList').innerHTML = saveWarnings.map((w) => `<li>${esc(w)}</li>`).join('');
     }
@@ -296,6 +450,9 @@ export async function render(view, params, ctx) {
 
     // ── actions ───────────────────────────────────────────────────────────
     cleanups.listen($('#f-port'), 'input', () => { formData.port = parseInt($('#f-port').value, 10) || 0; renderDerived(); });
+    // Any edit re-evaluates whether saving is meaningful.
+    cleanups.listen(formBox, 'input', syncSaveState);
+    cleanups.listen(formBox, 'change', syncSaveState);
     cleanups.listen($('#f-format'), 'change', renderDerived);
 
     $('#btnEye').addEventListener('click', () => {
@@ -306,6 +463,109 @@ export async function render(view, params, ctx) {
         state.showModelOverrides = !state.showModelOverrides;
         $('#overridesBox').hidden = !state.showModelOverrides;
         $('#btnOverrides').textContent = state.showModelOverrides ? '收起' : '展开';
+    });
+
+    // ── Claude Code 配置 ──────────────────────────────────────────────
+    for (const sel of ['#f-context', '#f-compact']) {
+        cleanups.listen($(sel), 'input', () => {
+            formData.context_window = parseInt($('#f-context').value, 10) || 0;
+            formData.compact_window = parseInt($('#f-compact').value, 10) || 0;
+            renderDerived();
+        });
+    }
+
+    // 1M 快捷按钮：选中后高亮，再点取消。默认值就是 1000000。
+    $('#btn1M').addEventListener('click', () => {
+        const active = $('#f-context').value === '1000000';
+        if (active) {
+            $('#f-context').value = '';
+            $('#f-compact').value = '';
+        } else {
+            $('#f-context').value = '1000000';
+            $('#f-compact').value = '';
+        }
+        $('#btn1M').classList.toggle('ui-button--primary', !active);
+        formData.context_window = active ? 0 : 1_000_000;
+        formData.compact_window = 0;
+        renderDerived();
+    });
+
+    $('#btnProbeCtx').addEventListener('click', async () => {
+        const btn = $('#btnProbeCtx');
+        btn.disabled = true;
+        btn.textContent = '探测中…';
+        try {
+            const data = await api.post('/api/probe-context', {
+                url: ($('#f-url').value || '').trim(),
+                key: ($('#f-key').value || '').trim(),
+                model: ($('#f-target').value || $('#f-probemodel').value || '').trim(),
+                instance_id: instanceId,
+            });
+            if (data.found && data.context_length) {
+                $('#f-context').value = data.context_length;
+                $('#f-compact').value = '';
+                formData.context_window = data.context_length;
+                formData.compact_window = 0;
+                $('#btn1M').classList.toggle('ui-button--primary', data.context_length === 1_000_000);
+                toast(`上游返回上下文长度：${data.context_length}（字段 ${data.source}）`, 'success');
+            } else {
+                toast('上游未提供上下文长度，请手动填写或点「1M」', 'warning');
+            }
+        } catch (e) {
+            toast('探测失败：' + e.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '探测';
+            renderDerived();
+        }
+    });
+
+    async function refreshPreview() {
+        if (!instanceId) { toast('请先保存实例，再预览配置文件', 'warning'); return; }
+        readForm();
+        try {
+            const data = await api.get(`/api/instances/${instanceId}/claude-config`);
+            const doc = { ...data.document };
+            if (formData.claude_config_use_upstream_key) {
+                toast('预览使用已保存的实例设置，密钥开关在保存后生效', 'warning');
+            }
+            $('#ccPreview').hidden = false;
+            $('#ccPreview').textContent = JSON.stringify(doc, null, 2);
+        } catch (e) {
+            toast(e.message || '预览失败', 'danger');
+        }
+    }
+    $('#btnPreviewCC').addEventListener('click', refreshPreview);
+
+    $('#btnPickFile').addEventListener('click', async () => {
+        try {
+            const data = await api.get('/api/claude-configs');
+            const available = (data.files || []).filter((f) => f.name !== 'settings.json');
+            if (!available.length) {
+                toast(`${data.directory} 下没有可选的配置文件`, 'warning');
+                return;
+            }
+            showFilePicker(data.directory, available, (picked) => {
+                $('#f-ccpath').value = picked.name;
+                formData.claude_config_path = picked.name;
+                renderDerived();
+            });
+        } catch (e) {
+            toast(e.message || '读取配置目录失败', 'danger');
+        }
+    });
+
+    $('#btnUnbindCC').addEventListener('click', async () => {
+        if (!instanceId) { $('#f-ccpath').value = ''; renderDerived(); return; }
+        try {
+            await api.del(`/api/instances/${instanceId}/claude-config`);
+            formData.claude_config_path = '';
+            $('#f-ccpath').value = '';
+            renderDerived();
+            toast('已解除绑定（配置文件中的相关字段已清理）', 'success');
+        } catch (e) {
+            toast(e.message || '解除绑定失败', 'danger');
+        }
     });
 
     $('#btnPort').addEventListener('click', async () => {
@@ -430,7 +690,26 @@ export async function render(view, params, ctx) {
             const data = isEdit
                 ? await api.patch(`/api/instances/${instanceId}`, body)
                 : await api.post('/api/instances', body);
+            // 绑定/更新配置文件（失败不应影响实例本身的保存结果）
+            const wantedPath = ($('#f-ccpath').value || '').trim();
+            let ccError = '';
+            if (wantedPath && data && data.id) {
+                try {
+                    await api.post(`/api/instances/${data.id}/claude-config`, {
+                        path: wantedPath,
+                        create: true,
+                    });
+                } catch (e) {
+                    ccError = e.message || '写入配置文件失败';
+                }
+            }
             const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+            if (ccError) {
+                saveWarnings.splice(0, saveWarnings.length, ccError);
+                renderDerived();
+                toast('实例已保存，但配置文件写入失败', 'warning');
+                return;
+            }
             if (warnings.length) {
                 // Replace, not append: a repeated save must not duplicate the
                 // same advisory in the list.

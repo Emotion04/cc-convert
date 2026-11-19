@@ -177,3 +177,20 @@ table.desktop-table th { color: var(--ui-fg-muted); font-weight: 500; font-size:
     gap: var(--ui-space-2);
     line-height: var(--ui-leading-normal);
 }
+
+/* Grouped settings block (fieldset) — a bordered section with a caption,
+   used where a form grows long enough to need visual grouping. */
+.desktop-fieldset {
+    border: 1px solid var(--ui-line);
+    border-radius: var(--ui-radius-md);
+    padding: var(--ui-space-8);
+    display: grid;
+    gap: var(--ui-space-3);
+    margin: 0;
+}
+.desktop-fieldset > legend {
+    padding: 0 var(--ui-space-3);
+    color: var(--ui-fg-muted);
+    font-size: var(--ui-text-sm);
+    font-weight: 600;
+}

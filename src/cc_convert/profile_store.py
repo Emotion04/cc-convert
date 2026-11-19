@@ -119,6 +119,42 @@ class InstanceProfile(BaseModel):
     )
     auto_start: bool = True
 
+    # -- Claude Code settings binding --------------------------------------
+    # A bound file is a *minimal* settings fragment (``env`` + two cache TTL
+    # keys) that the user launches Claude Code with via
+    # ``claude --settings <file>``. Everything it omits falls back to the
+    # user's main settings.json, so only proxy-specific values live here.
+    claude_config_path: str = Field(
+        default="",
+        description="Path of the bound Claude Code settings file ('' = unbound)",
+    )
+    context_window: int = Field(
+        default=0,
+        description="CLAUDE_CODE_MAX_CONTEXT_TOKENS to write; 0 = omit (inherit)",
+    )
+    compact_window: int = Field(
+        default=0,
+        description="CLAUDE_CODE_AUTO_COMPACT_WINDOW to write; 0 = omit",
+    )
+    prompt_cache_ttl: str = Field(
+        default="",
+        description="promptCacheTtl: '5m' | '1h' | '' (omit; Claude models only)",
+    )
+    subagent_cache_ttl: str = Field(
+        default="",
+        description="subagentPromptCacheTtl: '5m' | '1h' | '' (omit)",
+    )
+    #: Write the upstream key into the generated file instead of a local
+    #: placeholder. Only meaningful when the file bypasses the proxy.
+    claude_config_use_upstream_key: bool = False
+
+    @field_validator("prompt_cache_ttl", "subagent_cache_ttl")
+    @classmethod
+    def _validate_cache_ttl(cls, v: str) -> str:
+        if v not in ("", "5m", "1h"):
+            raise ValueError("cache TTL must be '', '5m' or '1h'")
+        return v
+
     # -- validators --------------------------------------------------------
 
     @field_validator("name")

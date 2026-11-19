@@ -398,7 +398,12 @@ class InstanceSupervisor:
         allowed = {"name", "port", "upstream_base_url", "upstream_api_key", "target_model", "auto_start", "upstream_format",
                    "client_model", "client_sonnet_model", "client_opus_model", "client_haiku_model",
                    "thinking_history", "thinking_history_auto_correct",
-                   "thinking_history_force_manual", "probe_model"}
+                   "thinking_history_force_manual", "probe_model",
+                   # Claude Code settings binding: none of these reach the
+                   # worker's Settings, so they never need a restart.
+                   "claude_config_path", "context_window", "compact_window",
+                   "prompt_cache_ttl", "subagent_cache_ttl",
+                   "claude_config_use_upstream_key"}
         patch = {k: v for k, v in patch.items() if k in allowed}
         if not patch:
             return {"success": True}
@@ -424,10 +429,34 @@ class InstanceSupervisor:
             "thinking_history_force_manual": instance.thinking_history_force_manual,
             "probe_model": instance.probe_model,
             "auto_start": instance.auto_start,
+            "claude_config_path": instance.claude_config_path,
+            "context_window": instance.context_window,
+            "compact_window": instance.compact_window,
+            "prompt_cache_ttl": instance.prompt_cache_ttl,
+            "subagent_cache_ttl": instance.subagent_cache_ttl,
+            "claude_config_use_upstream_key": instance.claude_config_use_upstream_key,
         }
 
         # If only safe-to-apply-without-restart fields changed.
-        only_safe = all(k in ("name", "auto_start", "client_model", "client_sonnet_model", "client_opus_model", "client_haiku_model") for k in patch)
+        # Fields that only affect the generated Claude Code settings file
+        # (and the copy-config popover) are applied without touching the
+        # worker: restarting a healthy proxy for a cosmetic change would drop
+        # in-flight requests for no reason.
+        settings_only = {
+            "name",
+            "auto_start",
+            "client_model",
+            "client_sonnet_model",
+            "client_opus_model",
+            "client_haiku_model",
+            "claude_config_path",
+            "context_window",
+            "compact_window",
+            "prompt_cache_ttl",
+            "subagent_cache_ttl",
+            "claude_config_use_upstream_key",
+        }
+        only_safe = all(k in settings_only for k in patch)
 
         # Apply patch to profile in-memory.
         for k, v in patch.items():
