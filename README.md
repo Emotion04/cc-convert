@@ -19,15 +19,18 @@
 
 CC Convert 的每个实例是独立端口。为每个窗口准备一份 `settings.json`，用 `claude --setting` 启动，不同窗口就能走不同的实例：
 
-1. 在 Dashboard 创建多个实例（各对应不同上游/模型），记下各自端口
-2. 为每个实例生成 settings 文件。实例卡片的**复制配置**可直接输出 `settings.json` 片段：
+1. 在 Dashboard 创建多个实例（各对应不同上游/模型），记下各自端口，如 `http://127.0.0.1:18401`.
+2. 为每个实例生成 settings 文件。
+
+（实验性：实例卡片的**复制配置**可直接输出 `settings.json` 片段）：
 
 ```json
 // settings-work.json —— 窗口 1
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:18401",
-    "ANTHROPIC_AUTH_TOKEN": "local"
+    "ANTHROPIC_AUTH_TOKEN": "api-key1 or local",
+    "ANTHROPIC_MODEL": "model-name-1",
   }
 }
 ```
@@ -37,12 +40,15 @@ CC Convert 的每个实例是独立端口。为每个窗口准备一份 `setting
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:18402",
-    "ANTHROPIC_AUTH_TOKEN": "local"
+    "ANTHROPIC_AUTH_TOKEN": "api-key2 or local",
+    "ANTHROPIC_MODEL": "model-name-2",
   }
 }
 ```
 
-3. 分别启动：
+以上是一个最小配置文件。
+
+1. 分别启动：
 
 ```bash
 claude --setting settings-work.json    # 窗口 1 → 实例 A

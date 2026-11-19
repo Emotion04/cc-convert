@@ -11,7 +11,7 @@
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -221,17 +221,6 @@ fn manager_log_tail(lines: usize) -> String {
     String::new()
 }
 
-fn wait_for_manager(endpoint: &ManagerEndpoint, deadline: Duration) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < deadline {
-        if endpoint.reachable() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(800));
-    }
-    false
-}
-
 /// Background watcher: notify on Manager up/down transitions and on any
 /// instance flipping into `error`. Polls only; never mutates state.
 fn spawn_watcher(app: tauri::AppHandle, endpoint: ManagerEndpoint) {
@@ -300,9 +289,8 @@ fn spawn_watcher(app: tauri::AppHandle, endpoint: ManagerEndpoint) {
     });
 }
 
-/// Render a real failure reason into the offline page instead of leaving the
-/// generic "not running" text. The details travel through `document.title`
-/// only as a fallback; the visible block is appended to the page body.
+/// Report a failure on the splash page: the reason, what was tried, and the
+/// tail of the service log. The page decides how to present it.
 fn show_failure(app: &tauri::AppHandle, reason: &str, log_tail: &str) {
     let Some(win) = app.get_webview_window("main") else {
         return;
@@ -311,32 +299,55 @@ fn show_failure(app: &tauri::AppHandle, reason: &str, log_tail: &str) {
     let _ = win.set_focus();
     let payload = serde_json::json!({ "reason": reason, "log": log_tail });
     let _ = win.eval(&format!(
-        r#"(function(){{
-  var d = {payload};
-  var box = document.getElementById('diagnosis');
-  if (!box) {{
-    box = document.createElement('pre');
-    box.id = 'diagnosis';
-    box.style.cssText = 'text-align:left;white-space:pre-wrap;font:12px/1.6 Consolas,monospace;'
-      + 'background:#1f1f1f;border:1px solid #333;border-radius:10px;padding:14px;'
-      + 'max-height:45vh;overflow:auto;color:#e7e5e4;margin-top:18px';
-    (document.querySelector('.box') || document.body).appendChild(box);
-  }}
-  box.textContent = d.reason + (d.log ? '\n\n--- Manager 日志尾部 ---\n' + d.log : '');
-}})();"#,
+        "window.ccFail && window.ccFail({payload}['reason'], {payload}['log']);",
         payload = payload
     ));
+}
+
+/// Push one progress line to the splash page.
+///
+/// Progress is advisory: a missing window or a page that already navigated
+/// away must never disturb the startup sequence.
+fn splash_step(app: &tauri::AppHandle, label: &str) {
+    if let Some(win) = app.get_webview_window("main") {
+        let payload = serde_json::json!(label);
+        let _ = win.eval(&format!("window.ccStep && window.ccStep({payload});"));
+    }
 }
 
 fn ensure_manager_and_navigate(app: &tauri::AppHandle, endpoint: ManagerEndpoint) {
     let app = app.clone();
     std::thread::spawn(move || {
+        // The window is already on screen showing the splash: from here the
+        // user watches real progress instead of a frozen desktop shortcut.
         let mut failure: Option<String> = None;
-        if !endpoint.reachable() {
+
+        if endpoint.reachable() {
+            splash_step(&app, "检测到已在运行的服务，正在连接…");
+        } else {
+            splash_step(&app, "正在启动本地服务…");
             match spawn_manager(Some(&app)) {
                 Err(e) => failure = Some(e),
                 Ok(()) => {
-                    if !wait_for_manager(&endpoint, Duration::from_secs(60)) {
+                    splash_step(&app, "等待服务响应…");
+                    let mut reported_port = 0u16;
+                    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+                    let mut ready = false;
+                    while std::time::Instant::now() < deadline {
+                        if endpoint.reachable() {
+                            ready = true;
+                            break;
+                        }
+                        // The manager may create its config *after* we start
+                        // (first run), which changes the port — surface that.
+                        let port = endpoint.port();
+                        if port != reported_port {
+                            reported_port = port;
+                            splash_step(&app, &format!("等待服务响应（端口 {port}）…"));
+                        }
+                        std::thread::sleep(Duration::from_millis(600));
+                    }
+                    if !ready {
                         failure = Some(format!(
                             "已启动核心进程，但 60 秒内 http://127.0.0.1:{}/api/manager 无响应。\n\
                              可能原因：端口被占用、配置有误，或核心进程启动即退出。",
@@ -346,16 +357,19 @@ fn ensure_manager_and_navigate(app: &tauri::AppHandle, endpoint: ManagerEndpoint
                 }
             }
         }
+
         if let Some(reason) = failure {
             show_failure(&app, &reason, &manager_log_tail(25));
             let _ = app
                 .notification()
                 .builder()
                 .title("CC Convert")
-                .body("Manager 启动失败：窗口内已显示具体原因")
+                .body("服务启动失败：窗口内已显示具体原因")
                 .show();
             return;
         }
+
+        splash_step(&app, "正在加载界面…");
         if let Some(win) = app.get_webview_window("main") {
             let _ = win.show();
             let _ = win.set_focus();
@@ -368,7 +382,7 @@ fn ensure_manager_and_navigate(app: &tauri::AppHandle, endpoint: ManagerEndpoint
             .notification()
             .builder()
             .title("CC Convert")
-            .body("Manager 已就绪")
+            .body("已就绪")
             .show();
         spawn_watcher(app, endpoint);
     });

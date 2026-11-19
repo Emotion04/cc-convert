@@ -2,24 +2,147 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>CC Convert — Manager 未运行</title>
+<title>CC Convert</title>
 <style>
-  body { font-family: system-ui, "Microsoft YaHei", sans-serif; background: #171717; color: #e7e5e4;
-         display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-  .box { max-width: 460px; text-align: center; padding: 40px; }
-  h1 { font-size: 18px; } p { color: #a8a29e; font-size: 13px; line-height: 1.8; }
-  code { background: #262626; padding: 2px 6px; border-radius: 6px; }
-  button { margin-top: 16px; padding: 10px 22px; border: 0; border-radius: 10px; cursor: pointer;
-           background: #F97316; color: #fff; font-weight: 600; }
+  :root {
+    color-scheme: dark;
+    --fg: #e7e5e4;
+    --muted: #78716c;
+    --accent: #f97316;
+    --line: #2a2a2a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: grid; place-items: center;
+    background: #171717; color: var(--fg);
+    font: 14px/1.7 system-ui, "Microsoft YaHei", sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  .splash { width: 420px; padding: 32px; text-align: center; }
+
+  /* Progress ring around the logo */
+  .mark { position: relative; width: 72px; height: 72px; margin: 0 auto 22px; }
+  .mark svg.ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .mark svg.ring circle { fill: none; stroke-width: 3; }
+  .mark .track { stroke: var(--line); }
+  .mark .bar {
+    stroke: var(--accent); stroke-linecap: round; stroke-dasharray: 60 200;
+    transform-origin: center;
+    animation: spin 1.15s cubic-bezier(.45,.05,.55,.95) infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .mark .glyph {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 22px; font-weight: 700; color: var(--accent);
+  }
+
+  h1 { margin: 0 0 4px; font-size: 17px; font-weight: 650; letter-spacing: .01em; }
+  .sub { margin: 0 0 24px; color: var(--muted); font-size: 12px; }
+
+  /* Step log: newest on top, older lines fade back and scroll up */
+  #steps {
+    position: relative; height: 96px; overflow: hidden;
+    display: flex; flex-direction: column-reverse; gap: 2px;
+    text-align: left; padding: 0 6px;
+    mask-image: linear-gradient(to bottom, transparent, #000 28%, #000 72%, transparent);
+  }
+  .step {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12.5px; color: var(--muted);
+    opacity: .38; transform: translateY(0);
+    transition: opacity .35s ease, color .35s ease, transform .35s ease;
+    animation: rise .4s cubic-bezier(.2,.7,.3,1);
+  }
+  /* The most recent line sits at the bottom (column-reverse) and is brightest */
+  .step:first-child { opacity: 1; color: var(--fg); }
+  .step:first-child .dot { background: var(--accent); box-shadow: 0 0 0 3px rgb(249 115 22 / .16); }
+  .step .dot {
+    width: 5px; height: 5px; border-radius: 50%; flex: none;
+    background: var(--muted); transition: background .35s ease;
+  }
+  .step.done .dot { background: #22c55e; box-shadow: none; }
+  .step.fail { color: #f87171; opacity: 1; }
+  .step.fail .dot { background: #ef4444; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+
+  .hint { margin-top: 22px; font-size: 11.5px; color: #57534e; }
+  .hint button {
+    margin-top: 10px; padding: 7px 18px; border: 1px solid var(--line);
+    border-radius: 9px; background: #262626; color: var(--fg);
+    font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+  .hint button:hover { background: #303030; }
+
+  /* Failure details replace the step log */
+  #diagnosis {
+    display: none; text-align: left; white-space: pre-wrap;
+    font: 11.5px/1.6 Consolas, monospace; color: #d6d3d1;
+    background: #1c1c1c; border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; max-height: 40vh; overflow: auto; margin-top: 16px;
+  }
+  body.failed #steps { display: none; }
+  body.failed #diagnosis { display: block; }
+  body.failed .mark .bar { animation: none; stroke: #ef4444; stroke-dasharray: 200 200; }
+  body.failed .mark .glyph { color: #ef4444; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .step, .mark .bar { animation: none; transition: none; }
+  }
 </style>
 </head>
 <body>
-  <div class="box">
-    <h1>Manager 未运行</h1>
-    <p>桌面壳启动 Manager 失败或超时。<br>
-       可以手动执行 <code>ccconvert start</code> 后点击重试；<br>
-       源码运行时请先 <code>uv sync</code> 并确认 <code>ccconvert</code> 命令可用。</p>
-    <button onclick="location.reload()">重试</button>
+  <div class="splash">
+    <div class="mark">
+      <svg class="ring" viewBox="0 0 72 72" aria-hidden="true">
+        <circle class="track" cx="36" cy="36" r="32"></circle>
+        <circle class="bar" cx="36" cy="36" r="32"></circle>
+      </svg>
+      <div class="glyph">⇅</div>
+    </div>
+
+    <h1>CC Convert</h1>
+    <p class="sub">正在启动本地服务</p>
+
+    <div id="steps" role="status" aria-live="polite"></div>
+    <pre id="diagnosis"></pre>
+
+    <p class="hint" id="hint">首次启动需要几秒钟，请稍候</p>
   </div>
+
+<script>
+  // Tauri pushes progress through window.ccStep(label) / ccFail(reason, log).
+  // Keeping the state in one place means the Rust side stays dumb: it only
+  // reports what it is doing.
+  (function () {
+    var steps = document.getElementById('steps');
+    var hint = document.getElementById('hint');
+    var diagnosis = document.getElementById('diagnosis');
+    var current = null;
+
+    window.ccStep = function (label) {
+      if (current) { current.classList.add('done'); current.classList.remove('active'); }
+      var el = document.createElement('div');
+      el.className = 'step';
+      var dot = document.createElement('span');
+      dot.className = 'dot';
+      el.appendChild(dot);
+      el.appendChild(document.createTextNode(label));
+      steps.insertBefore(el, steps.firstChild);
+      current = el;
+      // Keep the list short; oldest lines scroll out of the mask.
+      while (steps.children.length > 8) steps.removeChild(steps.lastChild);
+    };
+
+    window.ccFail = function (reason, log) {
+      document.body.classList.add('failed');
+      document.querySelector('.sub').textContent = '启动失败';
+      diagnosis.textContent = reason + (log ? '\n\n— 服务日志尾部 —\n' + log : '');
+      hint.innerHTML =
+        '<button onclick="location.reload()">重试</button>';
+    };
+
+    window.ccStep('正在读取配置…');
+  })();
+</script>
 </body>
 </html>
