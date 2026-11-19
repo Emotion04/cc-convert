@@ -17,6 +17,10 @@ from PyInstaller.utils.hooks import collect_all
 # Jinja templates are read from the bundle, not from a .py file on disk.
 datas = [
     ("src/cc_convert/web/templates", "cc_convert/web/templates"),
+    # Static assets served by the manager: the vendored Chart.js and the
+    # whole /desktop frontend live here. A missing directory makes the
+    # manager die at startup (StaticFiles mount), so it must ship.
+    ("src/cc_convert/web/static", "cc_convert/web/static"),
 ]
 binaries = []
 hiddenimports = []

@@ -2,14 +2,39 @@
 """Platform-specific runtime path resolution for cc-convert."""
 
 import os
+import sys
 from pathlib import Path
+
+#: Directory name that switches a packaged build into portable mode.
+PORTABLE_DIR_NAME = "data"
+
+
+def get_portable_root() -> Path | None:
+    """Return the portable data root for a packaged build, or ``None``.
+
+    A portable ("green") build keeps its configuration and runtime state in
+    a ``data/`` folder beside the executable, so the whole directory can be
+    moved or carried on a USB stick. The directory must exist — we never
+    create it implicitly, because that would silently shadow a user's
+    existing ``~/.ccconvert`` setup on first run.
+
+    Only frozen builds are affected; running from source always uses the
+    normal per-user locations.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    exe_dir = Path(sys.executable).resolve().parent
+    candidate = exe_dir / PORTABLE_DIR_NAME
+    if candidate.is_dir():
+        return candidate
+    return None
 
 
 def get_config_dir() -> Path:
     """Get platform-specific config directory.
 
-    Respects the ``CCCONVERT_CONFIG_DIR`` environment variable.
-    Defaults to ~/.ccconvert.
+    Priority: ``CCCONVERT_CONFIG_DIR`` → portable ``<exe>/data/config`` →
+    ``~/.ccconvert``.
 
     Returns:
         Path to the config directory
@@ -17,6 +42,9 @@ def get_config_dir() -> Path:
     override = os.environ.get("CCCONVERT_CONFIG_DIR")
     if override:
         return Path(override)
+    portable = get_portable_root()
+    if portable is not None:
+        return portable / "config"
     return Path.home() / ".ccconvert"
 
 
@@ -32,9 +60,8 @@ def get_config_file() -> Path:
 def get_runtime_dir() -> Path:
     """Get platform-specific runtime data directory.
 
-    Respects the ``CCCONVERT_RUNTIME_DIR`` environment variable.
-    Windows: %LOCALAPPDATA%\\ccconvert
-    POSIX:   ~/.local/share/ccconvert
+    Priority: ``CCCONVERT_RUNTIME_DIR`` → portable ``<exe>/data/runtime`` →
+    ``%LOCALAPPDATA%\\ccconvert`` (Windows) / ``~/.local/share/ccconvert``.
 
     Returns:
         Path to the runtime data directory
@@ -42,6 +69,9 @@ def get_runtime_dir() -> Path:
     override = os.environ.get("CCCONVERT_RUNTIME_DIR")
     if override:
         return Path(override)
+    portable = get_portable_root()
+    if portable is not None:
+        return portable / "runtime"
     if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:

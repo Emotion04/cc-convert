@@ -362,11 +362,22 @@ def create_manager_app(store, supervisor) -> FastAPI:
 
     from cc_convert.web.routes import _static_directory
 
-    app.mount(
-        "/static",
-        StaticFiles(directory=str(_static_directory())),
-        name="static",
-    )
+    static_dir = _static_directory()
+    if static_dir.is_dir():
+        app.mount(
+            "/static",
+            StaticFiles(directory=str(static_dir)),
+            name="static",
+        )
+    else:
+        # Missing assets must not take the whole manager down: the API and
+        # the Jinja pages still work, only /desktop and charts degrade.
+        # (A bundled build that omits them is a packaging bug — log it loudly.)
+        logging.error(
+            "Static assets directory is missing: %s — /static will 404 "
+            "(packaging error: web/static must be included in the bundle)",
+            static_dir,
+        )
 
     # Generate per-startup CSRF token
     app.state.csrf_token = secrets.token_urlsafe(32)
