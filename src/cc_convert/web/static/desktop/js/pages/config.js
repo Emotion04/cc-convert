@@ -91,7 +91,7 @@ export async function render(view, params, ctx) {
         compact_window: 0,
         prompt_cache_ttl: '',
         subagent_cache_ttl: '',
-        claude_config_use_upstream_key: false,
+        claude_config_use_upstream_key: true,
     };
     let originalData = null;
     let thinkingCorrected = false;
@@ -258,7 +258,7 @@ export async function render(view, params, ctx) {
                         </div>
                         <p class="desktop-hint" id="ccBindHint"></p>
                         <label class="desktop-row" style="font-size:12px; margin-top:8px">
-                            <input type="checkbox" id="f-ccupstream"> 写入上游真实密钥（仅当此配置绕过代理直连上游时需要）
+                            <input type="checkbox" id="f-ccupstream" checked> 在配置文件中写入上游真实密钥（便于直接查看与管理；代理本身不校验该值）
                         </label>
                     </div>
 
@@ -320,7 +320,7 @@ export async function render(view, params, ctx) {
         $('#f-compact').value = formData.compact_window || '';
         $('#f-ttl').value = formData.prompt_cache_ttl || '';
         $('#f-subttl').value = formData.subagent_cache_ttl || '';
-        $('#f-ccupstream').checked = !!formData.claude_config_use_upstream_key;
+        $('#f-ccupstream').checked = formData.claude_config_use_upstream_key !== false;
         $('#f-autocorrect').checked = formData.thinking_history_auto_correct;
         $('#f-forcemanual').checked = formData.thinking_history_force_manual;
         renderDerived();

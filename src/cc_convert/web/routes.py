@@ -506,7 +506,7 @@ async def create_instance(request: Request):
         prompt_cache_ttl=str(data.get("prompt_cache_ttl") or ""),
         subagent_cache_ttl=str(data.get("subagent_cache_ttl") or ""),
         claude_config_use_upstream_key=bool(
-            data.get("claude_config_use_upstream_key", False)
+            data.get("claude_config_use_upstream_key", True)
         ),
     )
 

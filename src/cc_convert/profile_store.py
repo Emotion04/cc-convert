@@ -145,8 +145,11 @@ class InstanceProfile(BaseModel):
         description="subagentPromptCacheTtl: '5m' | '1h' | '' (omit)",
     )
     #: Write the upstream key into the generated file instead of a local
-    #: placeholder. Only meaningful when the file bypasses the proxy.
-    claude_config_use_upstream_key: bool = False
+    #: placeholder. Defaults to on so the generated file is self-describing
+    #: and stays usable if the user points it somewhere else later. The
+    #: proxy does not check the token, so this is a convenience, not a
+    #: requirement.
+    claude_config_use_upstream_key: bool = True
 
     @field_validator("prompt_cache_ttl", "subagent_cache_ttl")
     @classmethod

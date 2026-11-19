@@ -86,11 +86,16 @@ class TestRender:
         inst = FakeInstance(target_model="upstream-name", client_model="claude-name")
         assert claude_config.render_for_instance(inst)["env"]["ANTHROPIC_MODEL"] == "claude-name"
 
-    def test_upstream_key_is_opt_in(self):
+    def test_upstream_key_written_when_requested(self):
+        # The proxy never checks the token; writing the real key makes the
+        # generated file self-describing, which is the default in the UI.
         inst = FakeInstance()
+        assert claude_config.render_for_instance(inst, upstream_key=True)["env"][
+            "ANTHROPIC_AUTH_TOKEN"
+        ] == "sk-upstream"
+        # The placeholder remains available for setups that must not persist
+        # the key to disk.
         assert claude_config.render_for_instance(inst)["env"]["ANTHROPIC_AUTH_TOKEN"] == "local"
-        with_key = claude_config.render_for_instance(inst, upstream_key=True)
-        assert with_key["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-upstream"
 
     def test_explicit_compact_window_wins(self):
         inst = FakeInstance(context_window=200_000, compact_window=150_000)
