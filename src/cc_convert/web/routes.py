@@ -463,6 +463,20 @@ async def create_instance(request: Request):
     if errors:
         raise HTTPException(422, detail="; ".join(errors))
 
+    # Idempotency guard: a repeated submit (double click, client retry, a
+    # second tab) must not append another copy. Same name + upstream + target
+    # port means the caller is re-sending a request that already succeeded,
+    # so return the existing instance instead of creating a twin.
+    requested_port = data.get("port") or 0
+    for existing in store.instances:
+        if (
+            existing.name == data["name"]
+            and existing.upstream_base_url == data["upstream_base_url"]
+            and (not requested_port or existing.port == requested_port)
+        ):
+            st = await supervisor.get_instance_status(existing.id)
+            return {**_instance_to_response(existing, st), "warnings": []}
+
     port = data.get("port", 0)
     if not port or port == 0:
         port = suggest_port(store)

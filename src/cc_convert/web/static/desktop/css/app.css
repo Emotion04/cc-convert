@@ -166,3 +166,14 @@ table.desktop-table th { color: var(--ui-fg-muted); font-weight: 500; font-size:
     text-align: center;
     padding: 40px 0;
 }
+
+/* Alert spacing: an alert sitting above a form needs separation from it, and
+   its list needs the framework's rhythm rather than browser defaults. */
+.desktop-alert { margin-bottom: var(--ui-space-8); }
+.desktop-alert__list {
+    margin: var(--ui-space-3) 0 0;
+    padding-left: var(--ui-space-9);
+    display: grid;
+    gap: var(--ui-space-2);
+    line-height: var(--ui-leading-normal);
+}

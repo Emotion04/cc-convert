@@ -64,9 +64,11 @@ export async function render(view, params, ctx) {
 
     view.innerHTML = `
         <div class="ui-card" style="max-width:720px">
-            <div id="warningsBox" class="ui-alert ui-alert--warning" hidden>
-                <p style="margin:0 0 4px"><strong>已保存，但检测到以下问题：</strong></p>
-                <ul id="warningsList" style="margin:4px 0 0; padding-left:18px"></ul>
+            <div id="warningsBox" class="ui-alert ui-alert--warning desktop-alert" role="status" hidden>
+                <span class="ui-alert__body">
+                    <span class="ui-alert__title">已保存，但检测到以下问题</span>
+                    <ul id="warningsList" class="desktop-alert__list"></ul>
+                </span>
             </div>
 
             <div id="loadingBox" style="text-align:center; padding:40px"><div class="ui-spinner"></div><p class="desktop-muted">加载配置中…</p></div>
@@ -403,11 +405,15 @@ export async function render(view, params, ctx) {
     });
 
     $('#btnSave').addEventListener('click', async () => {
+        // Guard synchronously: a fast double-click queues two click events
+        // before the button is disabled, and each would create an instance.
+        if (state.saving) return;
         readForm();
         if (!formData.name) { toast('请输入实例名称', 'danger'); return; }
         if (!isEdit && !formData.upstream_api_key) { toast('请填写 API 密钥', 'danger'); return; }
         if (!formData.upstream_base_url) { toast('请填写上游 Base URL', 'danger'); return; }
 
+        state.saving = true;
         $('#btnSave').disabled = true;
         $('#btnSave').textContent = '保存中…';
         try {
@@ -426,7 +432,9 @@ export async function render(view, params, ctx) {
                 : await api.post('/api/instances', body);
             const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
             if (warnings.length) {
-                saveWarnings.push(...warnings);
+                // Replace, not append: a repeated save must not duplicate the
+                // same advisory in the list.
+                saveWarnings.splice(0, saveWarnings.length, ...new Set(warnings));
                 renderDerived();
                 toast('已保存，但有需要注意的问题', 'warning');
             } else {
@@ -436,6 +444,7 @@ export async function render(view, params, ctx) {
         } catch (e) {
             toast(e.message || '保存失败', 'danger');
         } finally {
+            state.saving = false;
             $('#btnSave').disabled = false;
             $('#btnSave').textContent = '保存';
         }

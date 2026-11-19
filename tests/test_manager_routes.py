@@ -805,3 +805,49 @@ class TestNormalizeInstanceFields:
         _normalize_instance_fields(data)
 
         assert data == {"upstream_base_url": None, "upstream_api_key": 123}
+
+
+class TestCreateInstanceIdempotency:
+    """A repeated submit must not create a second copy of the same instance."""
+
+    def test_duplicate_submit_returns_existing(self, client, csrf_headers, mock_store):
+        body = {
+            "name": "毛豆ds",
+            "port": 18402,
+            "upstream_base_url": "https://maodouapi.cc/v1",
+            "upstream_api_key": "sk-test",
+            "auto_start": False,
+        }
+        with patch(
+            "cc_convert.web.routes.check_upstream_base_url",
+            new=AsyncMock(return_value=[]),
+        ):
+            first = client.post("/api/instances", json=body, headers=csrf_headers)
+            second = client.post("/api/instances", json=body, headers=csrf_headers)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["id"] == second.json()["id"]
+        assert len([i for i in mock_store.instances if i.name == "毛豆ds"]) == 1
+
+    def test_same_name_different_port_creates_separate(
+        self, client, csrf_headers, mock_store
+    ):
+        base = {
+            "name": "dup-name",
+            "upstream_base_url": "https://example.test/v1",
+            "upstream_api_key": "sk-test",
+            "auto_start": False,
+        }
+        with patch(
+            "cc_convert.web.routes.check_upstream_base_url",
+            new=AsyncMock(return_value=[]),
+        ):
+            a = client.post(
+                "/api/instances", json={**base, "port": 18701}, headers=csrf_headers
+            )
+            b = client.post(
+                "/api/instances", json={**base, "port": 18702}, headers=csrf_headers
+            )
+        assert a.status_code == 200 and b.status_code == 200
+        assert a.json()["id"] != b.json()["id"]
