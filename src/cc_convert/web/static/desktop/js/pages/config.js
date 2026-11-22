@@ -106,13 +106,6 @@ export async function render(view, params, ctx) {
 
     view.innerHTML = `
         <div class="ui-card" style="max-width:720px">
-            <div id="warningsBox" class="ui-alert ui-alert--warning desktop-alert" role="status" hidden>
-                <span class="ui-alert__body">
-                    <span class="ui-alert__title">已保存，但检测到以下问题</span>
-                    <ul id="warningsList" class="desktop-alert__list"></ul>
-                </span>
-            </div>
-
             <div id="loadingBox" style="text-align:center; padding:40px"><div class="ui-spinner"></div><p class="desktop-muted">加载配置中…</p></div>
 
             <div id="formBox" class="desktop-form" hidden>
@@ -403,9 +396,6 @@ export async function render(view, params, ctx) {
         $('#correctedBox').hidden = !thinkingCorrected;
         $('#correctedTo').textContent = thinkingCorrectedTo;
         $('#modelOptions').innerHTML = state.availableModels.map((m) => `<option value="${esc(m)}"></option>`).join('');
-        syncSaveState();
-        $('#warningsBox').hidden = saveWarnings.length === 0;
-        $('#warningsList').innerHTML = saveWarnings.map((w) => `<li>${esc(w)}</li>`).join('');
     }
 
     // ── edit mode: load existing ──────────────────────────────────────────
@@ -704,22 +694,16 @@ export async function render(view, params, ctx) {
                 }
             }
             const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+            // 无论有无告警都回到主界面；告警以悬浮 toast 呈现（右下角，长驻留），
+            // 不再用常驻内嵌横幅——保存后的注意力应该落在列表页，而不是表单顶部。
             if (ccError) {
-                saveWarnings.splice(0, saveWarnings.length, ccError);
-                renderDerived();
-                toast('实例已保存，但配置文件写入失败', 'warning');
-                return;
-            }
-            if (warnings.length) {
-                // Replace, not append: a repeated save must not duplicate the
-                // same advisory in the list.
-                saveWarnings.splice(0, saveWarnings.length, ...new Set(warnings));
-                renderDerived();
-                toast('已保存，但有需要注意的问题', 'warning');
+                toast('实例已保存，但配置文件写入失败：' + ccError, 'warning', 10000);
+            } else if (warnings.length) {
+                toast('已保存，但有需要注意的问题：' + warnings.join('；'), 'warning', 10000);
             } else {
                 toast(isEdit ? '实例已更新' : '实例已创建', 'success');
-                setTimeout(() => { window.location.hash = '#/'; }, 500);
             }
+            setTimeout(() => { window.location.hash = '#/'; }, 400);
         } catch (e) {
             toast(e.message || '保存失败', 'danger');
         } finally {

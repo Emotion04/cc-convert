@@ -57,7 +57,7 @@ export async function render(view, params, ctx) {
         <div class="desktop-kpis" id="kpis"></div>
 
         <div class="ui-alert ui-alert--warning" id="unreportedBox" hidden>
-            有 <strong id="unreportedN"></strong> 次请求未上报用量（常见于流式请求或中转不支持 include_usage）。这些请求没有被记入下面的 token 数字，避免低估。
+            <span class="ui-alert__body">有 <strong id="unreportedN"></strong> 次请求未上报用量（常见于流式请求或中转不支持 include_usage）。这些请求没有被记入下面的 token 数字，避免低估。</span>
         </div>
 
         <div class="desktop-inst-grid" style="grid-template-columns: 2fr 1fr">

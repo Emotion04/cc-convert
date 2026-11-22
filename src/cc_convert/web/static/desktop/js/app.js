@@ -5,9 +5,13 @@ import { createToastStack, bindDialog, bindSheet, setTheme } from '/static/deskt
 import { api } from './api.js';
 
 const toasts = createToastStack({ container: document.getElementById('toastStack') });
-export function toast(message, tone = 'default') {
-    toasts.push(message, { tone });
+export function toast(message, tone = 'default', timeout) {
+    // Warnings carry details the user must read; the framework default
+    // (~1.5-3s) is tuned for short confirmations only.
+    toasts.push(message, timeout ? { tone, timeout } : { tone });
 }
+// Exposed for ad-hoc diagnostics from the console and from the shell.
+window.toast = toast;
 
 const routes = {
     '/': { title: '仪表板', subtitle: '监控和管理你的 CC Convert 代理实例', load: () => import('./pages/dashboard.js') },
