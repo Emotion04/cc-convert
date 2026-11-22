@@ -36,7 +36,9 @@ class TestCompactWindow:
 
 
 class TestRender:
-    def test_minimal_document(self):
+    def test_minimal_document_writes_all_tiers(self):
+        # Every tier defaults to ANTHROPIC_MODEL: an unwritten tier would fall
+        # back to the main settings.json, whose model belongs elsewhere.
         doc = claude_config.render(
             claude_config.ClaudeConfigSpec(
                 base_url="http://127.0.0.1:18402", model="m-1"
@@ -47,6 +49,10 @@ class TestRender:
                 "ANTHROPIC_BASE_URL": "http://127.0.0.1:18402",
                 "ANTHROPIC_AUTH_TOKEN": "local",
                 "ANTHROPIC_MODEL": "m-1",
+                "ANTHROPIC_DEFAULT_FABLE_MODEL": "m-1",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": "m-1",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": "m-1",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": "m-1",
             }
         }
 
@@ -60,9 +66,17 @@ class TestRender:
         assert "promptCacheTtl" not in doc
         assert "subagentPromptCacheTtl" not in doc
 
+    def test_unknown_model_omits_model_keys(self):
+        # Neither client_model nor target_model set: there is no model name to
+        # write, so Claude Code keeps using the main settings.json's model.
+        doc = claude_config.render(claude_config.ClaudeConfigSpec(base_url="http://127.0.0.1:1"))
+        assert "ANTHROPIC_MODEL" not in doc["env"]
+        assert "ANTHROPIC_DEFAULT_FABLE_MODEL" not in doc["env"]
+
     def test_full_document(self):
         inst = FakeInstance(
             target_model="deepseek-v4.1-flash-1017[1m]",
+            client_sonnet_model="deepseek-sonnet-x",
             context_window=1_000_000,
             prompt_cache_ttl="1h",
             subagent_cache_ttl="5m",
@@ -70,17 +84,20 @@ class TestRender:
         doc = claude_config.render_for_instance(inst)
         env = doc["env"]
         assert env["ANTHROPIC_MODEL"] == "deepseek-v4.1-flash-1017[1m]"
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "deepseek-sonnet-x"
+        # Unset tiers inherit the main model.
+        assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "deepseek-v4.1-flash-1017[1m]"
         assert env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1000000"
         assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "970000"
         assert doc["promptCacheTtl"] == "1h"
         assert doc["subagentPromptCacheTtl"] == "5m"
 
-    def test_tier_overrides_only_when_set(self):
+    def test_tier_override_and_default_inherit(self):
         inst = FakeInstance(target_model="base", client_opus_model="opus-x")
         env = claude_config.render_for_instance(inst)["env"]
         assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "opus-x"
-        # Unset tiers inherit ANTHROPIC_MODEL, so they stay unwritten.
-        assert "ANTHROPIC_DEFAULT_SONNET_MODEL" not in env
+        # Unset tiers inherit ANTHROPIC_MODEL (the user's rule).
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "base"
 
     def test_client_model_beats_target_model(self):
         inst = FakeInstance(target_model="upstream-name", client_model="claude-name")

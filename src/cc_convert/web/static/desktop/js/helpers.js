@@ -49,6 +49,7 @@ export function modelOverrides(inst) {
     if (inst.client_sonnet_model) out.push(`ANTHROPIC_DEFAULT_SONNET_MODEL=${inst.client_sonnet_model}`);
     if (inst.client_opus_model) out.push(`ANTHROPIC_DEFAULT_OPUS_MODEL=${inst.client_opus_model}`);
     if (inst.client_haiku_model) out.push(`ANTHROPIC_DEFAULT_HAIKU_MODEL=${inst.client_haiku_model}`);
+    if (inst.client_fable_model) out.push(`ANTHROPIC_DEFAULT_FABLE_MODEL=${inst.client_fable_model}`);
     return out;
 }
 
@@ -79,6 +80,7 @@ export function settingsJson(inst) {
         ANTHROPIC_DEFAULT_SONNET_MODEL: inst.client_sonnet_model,
         ANTHROPIC_DEFAULT_OPUS_MODEL: inst.client_opus_model,
         ANTHROPIC_DEFAULT_HAIKU_MODEL: inst.client_haiku_model,
+        ANTHROPIC_DEFAULT_FABLE_MODEL: inst.client_fable_model,
     };
     const entries = Object.entries(map).filter(([, v]) => v);
     if (!entries.length) return '';

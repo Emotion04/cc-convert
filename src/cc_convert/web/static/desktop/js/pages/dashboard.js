@@ -144,6 +144,7 @@ export async function render(view, params, ctx) {
                 <div class="ui-cluster" style="gap:6px">
                     <button type="button" class="ui-button ui-button--danger" data-act="delete" data-id="${inst.id}">删除</button>
                     <button type="button" class="ui-button" data-act="edit" data-id="${inst.id}">编辑</button>
+                    <button type="button" class="ui-button" data-act="duplicate" data-id="${inst.id}">复制</button>
                     <div class="ui-cluster" style="position:relative">
                         <button type="button" class="ui-button" data-act="copy" data-id="${inst.id}">复制配置</button>
                         ${copyPopover(inst)}
@@ -285,6 +286,18 @@ export async function render(view, params, ctx) {
                     };
                     setTimeout(() => document.addEventListener('click', close), 0);
                 }
+            }
+        } else if (act === 'duplicate') {
+            busy[inst.id] = 'duplicate';
+            renderInstances();
+            try {
+                const copy = await api.post(`/api/instances/${inst.id}/duplicate`);
+                toast(`已复制为「${copy.name}」（端口 ${copy.port}，未启动）`, 'success');
+            } catch (e) {
+                toast('复制失败：' + e.message, 'danger');
+            } finally {
+                busy[inst.id] = null;
+                await fetchAll();
             }
         } else if (act === 'copy-config') {
             copyConfigText(inst);

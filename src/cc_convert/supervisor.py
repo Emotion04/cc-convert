@@ -396,7 +396,7 @@ class InstanceSupervisor:
           old instance is untouched.
         """
         allowed = {"name", "port", "upstream_base_url", "upstream_api_key", "target_model", "auto_start", "upstream_format",
-                   "client_model", "client_sonnet_model", "client_opus_model", "client_haiku_model",
+                   "client_model", "client_sonnet_model", "client_opus_model", "client_haiku_model", "client_fable_model",
                    "thinking_history", "thinking_history_auto_correct",
                    "thinking_history_force_manual", "probe_model",
                    # Claude Code settings binding: none of these reach the
@@ -423,6 +423,7 @@ class InstanceSupervisor:
             "client_sonnet_model": instance.client_sonnet_model,
             "client_opus_model": instance.client_opus_model,
             "client_haiku_model": instance.client_haiku_model,
+            "client_fable_model": instance.client_fable_model,
             "upstream_format": instance.upstream_format,
             "thinking_history": instance.thinking_history,
             "thinking_history_auto_correct": instance.thinking_history_auto_correct,

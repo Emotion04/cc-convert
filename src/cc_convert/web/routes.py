@@ -15,6 +15,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from cc_convert import __version__
+from uuid import uuid4
+
 from cc_convert.profile_store import (
     InstanceProfile,
     ProfileStore,
@@ -459,27 +461,29 @@ async def create_instance(request: Request):
 
     _normalize_instance_fields(data)
 
+    # Order matters: a blank port means "assign the next free one", so the
+    # suggestion must happen *before* the 1..65535 validation — validating
+    # first made the placeholder promise impossible to fulfil (422 on every
+    # auto-assign save).
+    if not data.get("port"):
+        data["port"] = suggest_port(store)
+
+    # Idempotency guard: a repeated submit (double click, client retry, a
+    # second tab) must not append another copy. Same name + upstream means
+    # the caller is re-sending a request that already succeeded, so return
+    # the existing instance instead of creating a twin. This check runs
+    # before the suggestion above would hand the retry a different port.
+    requested_url = data.get("upstream_base_url") or ""
+    for existing in store.instances:
+        if existing.name == data["name"] and existing.upstream_base_url == requested_url:
+            st = await supervisor.get_instance_status(existing.id)
+            return {**_instance_to_response(existing, st), "warnings": []}
+
     errors = _validate_instance_body(data, require_key=True)
     if errors:
         raise HTTPException(422, detail="; ".join(errors))
 
-    # Idempotency guard: a repeated submit (double click, client retry, a
-    # second tab) must not append another copy. Same name + upstream + target
-    # port means the caller is re-sending a request that already succeeded,
-    # so return the existing instance instead of creating a twin.
-    requested_port = data.get("port") or 0
-    for existing in store.instances:
-        if (
-            existing.name == data["name"]
-            and existing.upstream_base_url == data["upstream_base_url"]
-            and (not requested_port or existing.port == requested_port)
-        ):
-            st = await supervisor.get_instance_status(existing.id)
-            return {**_instance_to_response(existing, st), "warnings": []}
-
-    port = data.get("port", 0)
-    if not port or port == 0:
-        port = suggest_port(store)
+    port = data["port"]
 
     instance = InstanceProfile(
         name=data["name"],
@@ -492,6 +496,7 @@ async def create_instance(request: Request):
         client_sonnet_model=data.get("client_sonnet_model", ""),
         client_opus_model=data.get("client_opus_model", ""),
         client_haiku_model=data.get("client_haiku_model", ""),
+        client_fable_model=data.get("client_fable_model", ""),
         thinking_history=data.get("thinking_history", "auto"),
         thinking_history_auto_correct=bool(
             data.get("thinking_history_auto_correct", True)
@@ -526,6 +531,67 @@ async def create_instance(request: Request):
         status = {"status": "running" if ok else "error"}
 
     return {**_instance_to_response(instance, status), "warnings": warnings}
+
+
+@web_router.post("/api/instances/{instance_id}/duplicate")
+async def duplicate_instance(request: Request, instance_id: str):
+    """Copy an instance as a stopped twin.
+
+    Port is re-assigned (next free), auto_start is off, and the Claude Code
+    settings binding is cleared — the original still owns that file, and two
+    instances may not share one. The upstream key travels with the copy.
+    """
+    store = _get_store(request)
+    src = next((i for i in store.instances if i.id == instance_id), None)
+    if src is None:
+        raise HTTPException(404, detail="Instance not found")
+
+    new_id = "inst_" + uuid4().hex[:12]
+    taken = {i.name for i in store.instances}
+    if src.name.endswith("-副本"):
+        # Copying a copy continues the numbering: "twin-副本" -> "twin-副本 2".
+        stem, _, num = src.name.rpartition("-副本")
+        base_name = f"{stem}-副本"
+        n = int(num) if num.isdigit() else 1
+        name = f"{base_name} {n + 1}"
+        while name in taken:
+            n += 1
+            name = f"{base_name} {n + 1}"
+    else:
+        base_name = f"{src.name}-副本"
+        name = base_name
+        suffix = 2
+        while name in taken:
+            name = f"{base_name} {suffix}"
+            suffix += 1
+
+    copy = InstanceProfile(
+        id=new_id,
+        name=name,
+        port=suggest_port(store),
+        upstream_base_url=src.upstream_base_url,
+        upstream_api_key=src.upstream_api_key,
+        target_model=src.target_model,
+        probe_model=src.probe_model,
+        client_model=src.client_model,
+        client_sonnet_model=src.client_sonnet_model,
+        client_opus_model=src.client_opus_model,
+        client_haiku_model=src.client_haiku_model,
+        client_fable_model=src.client_fable_model,
+        upstream_format=src.upstream_format,
+        thinking_history=src.thinking_history,
+        thinking_history_auto_correct=src.thinking_history_auto_correct,
+        thinking_history_force_manual=src.thinking_history_force_manual,
+        auto_start=False,
+        context_window=src.context_window,
+        compact_window=src.compact_window,
+        prompt_cache_ttl=src.prompt_cache_ttl,
+        subagent_cache_ttl=src.subagent_cache_ttl,
+        claude_config_use_upstream_key=src.claude_config_use_upstream_key,
+    )
+    store.instances.append(copy)
+    save_profile_store(store)
+    return _instance_to_response(copy)
 
 
 @web_router.get("/api/instances/{instance_id}")

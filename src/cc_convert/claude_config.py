@@ -109,10 +109,14 @@ def render(spec: ClaudeConfigSpec) -> dict[str, Any]:
         "ANTHROPIC_BASE_URL": spec.base_url,
         "ANTHROPIC_AUTH_TOKEN": spec.auth_token,
     }
+    # Claude Code resolves each tier independently; an unwritten tier falls
+    # back to the *main* settings.json, whose model usually belongs to a
+    # different provider. The user's rule: tiers default to ANTHROPIC_MODEL,
+    # so all five keys are always written together once a model is known.
     if spec.model:
         env["ANTHROPIC_MODEL"] = spec.model
-        for key in spec.tier_models:
-            env[key] = spec.tier_models[key]
+        for key, _attr in TIER_KEYS:
+            env[key] = spec.tier_models.get(key) or spec.model
     if spec.context_window > 0:
         env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(spec.context_window)
     if spec.compact_window > 0:

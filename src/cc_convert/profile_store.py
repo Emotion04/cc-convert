@@ -99,6 +99,7 @@ class InstanceProfile(BaseModel):
     client_haiku_model: str = Field(default="", description="ANTHROPIC_DEFAULT_HAIKU_MODEL override for Claude Code (optional)")
     client_opus_model: str = Field(default="", description="ANTHROPIC_DEFAULT_OPUS_MODEL override for Claude Code (optional)")
     client_sonnet_model: str = Field(default="", description="ANTHROPIC_DEFAULT_SONNET_MODEL override for Claude Code (optional)")
+    client_fable_model: str = Field(default="", description="ANTHROPIC_DEFAULT_FABLE_MODEL override for Claude Code (optional)")
     upstream_format: Literal["chat_completions", "responses", "auto"] = Field(
         default="auto",
         description="Upstream API format: chat_completions, responses, or auto-detect"

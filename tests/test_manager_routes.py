@@ -830,9 +830,13 @@ class TestCreateInstanceIdempotency:
         assert first.json()["id"] == second.json()["id"]
         assert len([i for i in mock_store.instances if i.name == "毛豆ds"]) == 1
 
-    def test_same_name_different_port_creates_separate(
+    def test_same_name_same_url_returns_existing_even_with_other_port(
         self, client, csrf_headers, mock_store
     ):
+        # The create form is "save for this instance": a resubmit with the
+        # same name + upstream is a replay of the same save (the port may
+        # have been auto-assigned meanwhile), not a second instance. Distinct
+        # upstreams with the same name are still allowed.
         base = {
             "name": "dup-name",
             "upstream_base_url": "https://example.test/v1",
@@ -850,4 +854,87 @@ class TestCreateInstanceIdempotency:
                 "/api/instances", json={**base, "port": 18702}, headers=csrf_headers
             )
         assert a.status_code == 200 and b.status_code == 200
+        assert a.json()["id"] == b.json()["id"]
+        assert len([i for i in mock_store.instances if i.name == "dup-name"]) == 1
+
+    def test_same_name_different_upstream_creates_separate(
+        self, client, csrf_headers, mock_store
+    ):
+        base = {"name": "dup-name", "upstream_api_key": "sk-test", "auto_start": False}
+        with patch(
+            "cc_convert.web.routes.check_upstream_base_url",
+            new=AsyncMock(return_value=[]),
+        ):
+            a = client.post(
+                "/api/instances",
+                json={**base, "upstream_base_url": "https://a.test/v1", "port": 18703},
+                headers=csrf_headers,
+            )
+            b = client.post(
+                "/api/instances",
+                json={**base, "upstream_base_url": "https://b.test/v1", "port": 18704},
+                headers=csrf_headers,
+            )
+        assert a.status_code == 200 and b.status_code == 200
         assert a.json()["id"] != b.json()["id"]
+
+
+class TestDuplicateInstance:
+    def test_duplicate_copies_without_start(self, client, csrf_headers, mock_store):
+        with patch(
+            "cc_convert.web.routes.check_upstream_base_url",
+            new=AsyncMock(return_value=[]),
+        ):
+            created = client.post(
+                "/api/instances",
+                json={
+                    "name": "src",
+                    "port": 18710,
+                    "upstream_base_url": "https://src.test/v1",
+                    "upstream_api_key": "sk-secret",
+                    "auto_start": False,
+                    "target_model": "deepseek-v4.1",
+                },
+                headers=csrf_headers,
+            ).json()
+
+        dup = client.post(f"/api/instances/{created['id']}/duplicate", headers=csrf_headers)
+        assert dup.status_code == 200
+        body = dup.json()
+        assert body["name"] == "src-副本"
+        assert body["port"] != 18710
+        assert body["status"] in ("stopped", "unknown")
+        assert body["target_model"] == "deepseek-v4.1"
+
+        # The upstream key travels with the copy.
+        key_res = client.get(f"/api/instances/{body['id']}/key")
+        assert key_res.json()["key"] == "sk-secret"
+
+        names = [i.name for i in mock_store.instances]
+        assert names.count("src-副本") == 1
+
+    def test_duplicate_name_suffix_increments(self, client, csrf_headers, mock_store):
+        with patch(
+            "cc_convert.web.routes.check_upstream_base_url",
+            new=AsyncMock(return_value=[]),
+        ):
+            created = client.post(
+                "/api/instances",
+                json={
+                    "name": "twin",
+                    "port": 18711,
+                    "upstream_base_url": "https://twin.test/v1",
+                    "upstream_api_key": "sk-t",
+                    "auto_start": False,
+                },
+                headers=csrf_headers,
+            ).json()
+            d1 = client.post(f"/api/instances/{created['id']}/duplicate", headers=csrf_headers).json()
+            d2 = client.post(f"/api/instances/{d1['id']}/duplicate", headers=csrf_headers).json()
+
+        assert d1["name"] == "twin-副本"
+        assert d2["name"] == "twin-副本 2"
+
+    def test_duplicate_missing_instance(self, client, csrf_headers):
+        res = client.post("/api/instances/inst_missing/duplicate", headers=csrf_headers)
+        assert res.status_code == 404

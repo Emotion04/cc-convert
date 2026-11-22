@@ -81,6 +81,7 @@ export async function render(view, params, ctx) {
         client_sonnet_model: '',
         client_opus_model: '',
         client_haiku_model: '',
+        client_fable_model: '',
         auto_start: true,
         upstream_format: 'auto',
         thinking_history: 'auto',
@@ -186,7 +187,7 @@ export async function render(view, params, ctx) {
                     </div>
                     <div id="overridesBox" class="desktop-form" hidden style="border-left:2px solid var(--ui-line); padding-left:12px; margin-top:10px">
                         <p class="desktop-hint" style="margin:0">这些设置会显示在"复制配置"弹出框中，你需要手动设置到 Claude Code 的环境变量或 settings.json 中。CC Convert 不会自动注入。</p>
-                        ${[['client_model', 'ANTHROPIC_MODEL'], ['client_sonnet_model', 'ANTHROPIC_DEFAULT_SONNET_MODEL'], ['client_opus_model', 'ANTHROPIC_DEFAULT_OPUS_MODEL'], ['client_haiku_model', 'ANTHROPIC_DEFAULT_HAIKU_MODEL']].map(([id, label]) => `
+                        ${[['client_model', 'ANTHROPIC_MODEL'], ['client_sonnet_model', 'ANTHROPIC_DEFAULT_SONNET_MODEL'], ['client_opus_model', 'ANTHROPIC_DEFAULT_OPUS_MODEL'], ['client_haiku_model', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'], ['client_fable_model', 'ANTHROPIC_DEFAULT_FABLE_MODEL']].map(([id, label]) => `
                         <div>
                             <label class="desktop-label desktop-mono" style="font-size:11px">${label}</label>
                             <input type="text" class="ui-input desktop-mono" id="f-${id}" placeholder="留空则不注入">
@@ -305,6 +306,7 @@ export async function render(view, params, ctx) {
         $('#f-client_sonnet_model').value = formData.client_sonnet_model;
         $('#f-client_opus_model').value = formData.client_opus_model;
         $('#f-client_haiku_model').value = formData.client_haiku_model;
+        $('#f-client_fable_model').value = formData.client_fable_model;
         $('#f-autostart').checked = formData.auto_start;
         $('#f-format').value = formData.upstream_format;
         $('#f-thinking').value = formData.thinking_history;
@@ -331,6 +333,7 @@ export async function render(view, params, ctx) {
             client_sonnet_model: $('#f-client_sonnet_model').value.trim(),
             client_opus_model: $('#f-client_opus_model').value.trim(),
             client_haiku_model: $('#f-client_haiku_model').value.trim(),
+            client_fable_model: $('#f-client_fable_model').value.trim(),
             auto_start: $('#f-autostart').checked,
             upstream_format: $('#f-format').value,
             thinking_history: $('#f-thinking').value,
@@ -413,6 +416,7 @@ export async function render(view, params, ctx) {
                 client_sonnet_model: data.client_sonnet_model || '',
                 client_opus_model: data.client_opus_model || '',
                 client_haiku_model: data.client_haiku_model || '',
+                client_fable_model: data.client_fable_model || '',
                 auto_start: data.auto_start !== false,
                 upstream_format: data.upstream_format || 'auto',
                 thinking_history: data.thinking_history || 'auto',
