@@ -170,6 +170,7 @@ export async function render(view, params, ctx) {
                     <label class="desktop-label">目标模型 <span class="desktop-muted" style="font-weight:400">(可选)</span></label>
                     <div class="desktop-row">
                         <input type="text" class="ui-input desktop-mono" id="f-target" list="modelOptions" placeholder="留空则透传 Claude Code 的模型名">
+                        <button type="button" class="ui-button" id="btn1MSuffix" title="在模型名后拼接 [1m]，选择 1M 上下文变体">1M</button>
                         <button type="button" class="ui-button" id="btnModels">获取模型</button>
                     </div>
                     <datalist id="modelOptions"></datalist>
@@ -301,6 +302,7 @@ export async function render(view, params, ctx) {
         $('#f-url').value = formData.upstream_base_url;
         $('#f-key').value = formData.upstream_api_key;
         $('#f-target').value = formData.target_model;
+        if (typeof sync1MSuffix === 'function') sync1MSuffix();
         $('#f-probemodel').value = formData.probe_model;
         $('#f-client_model').value = formData.client_model;
         $('#f-client_sonnet_model').value = formData.client_sonnet_model;
@@ -443,6 +445,22 @@ export async function render(view, params, ctx) {
     if (isEdit) $('#btnEye').title = '显示/隐藏密钥';
 
     // ── actions ───────────────────────────────────────────────────────────
+    // 1M 开关：目标模型名后拼接/剥离 [1m]。后缀必须落在目标模型上——
+    // 代理把一切请求映射到它，只写在 JSON 里会被模型映射剥掉。
+    function sync1MSuffix() {
+        const value = $('#f-target').value || '';
+        $('#btn1MSuffix').classList.toggle('ui-button--primary', value.endsWith('[1m]'));
+    }
+    cleanups.listen($('#f-target'), 'input', sync1MSuffix);
+    $('#btn1MSuffix').addEventListener('click', () => {
+        const value = ($('#f-target').value || '').trim();
+        $('#f-target').value = value.endsWith('[1m]')
+            ? value.slice(0, -4)
+            : value + '[1m]';
+        sync1MSuffix();
+        renderDerived();
+    });
+
     cleanups.listen($('#f-port'), 'input', () => { formData.port = parseInt($('#f-port').value, 10) || 0; renderDerived(); });
     // Any edit re-evaluates whether saving is meaningful.
     cleanups.listen(formBox, 'input', syncSaveState);
