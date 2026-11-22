@@ -55,6 +55,7 @@ export async function render(view, params, ctx) {
             const bound = f.bound_to
                 ? `<span class="ui-badge ui-badge--success">${esc(f.bound_to.instance_name)}</span>`
                 : (f.is_main_settings ? '<span class="ui-badge">主配置</span>' : '<span class="desktop-muted">—</span>');
+            const manageable = !f.is_main_settings && !f.bound_to;
             return `
             <tr data-path="${esc(f.path)}" style="cursor:pointer">
                 <td><span class="desktop-mono">${esc(f.name)}</span></td>
@@ -62,12 +63,52 @@ export async function render(view, params, ctx) {
                     ${esc(f.base_url || '—')}
                 </td>
                 <td>${bound}</td>
-                <td><button type="button" class="ui-button" data-view="${esc(f.path)}">查看</button></td>
+                <td>
+                    <div class="ui-cluster" style="gap:4px">
+                        <button type="button" class="ui-button" data-view="${esc(f.path)}">查看</button>
+                        ${manageable ? `
+                        <button type="button" class="ui-button" data-rename="${esc(f.path)}" data-name="${esc(f.name)}">重命名</button>
+                        <button type="button" class="ui-button ui-button--danger" data-fdel="${esc(f.path)}">删除</button>` : ''}
+                    </div>
+                </td>
             </tr>`;
         }).join('');
     }
 
     cleanups.listen($('#tbody'), 'click', async (e) => {
+        const rn = e.target.closest('[data-rename]');
+        if (rn) {
+            const oldPath = rn.dataset.rename;
+            const oldName = rn.dataset.name;
+            const input = window.prompt('新的文件名（不含路径）', oldName);
+            if (!input || input === oldName) return;
+            try {
+                await api.post('/api/claude-configs/rename', { path: oldPath, new_name: input });
+                toast('已重命名', 'success');
+                await refresh();
+            } catch (err) {
+                toast(err.message || '重命名失败', 'danger');
+            }
+            return;
+        }
+        const fd = e.target.closest('[data-fdel]');
+        if (fd) {
+            if (fd.dataset.armed) {
+                fd.dataset.armed = '';
+                try {
+                    await api.del('/api/claude-configs?path=' + encodeURIComponent(fd.dataset.fdel));
+                    toast('配置文件已删除', 'success');
+                    await refresh();
+                } catch (err) {
+                    toast(err.message || '删除失败', 'danger');
+                }
+            } else {
+                fd.dataset.armed = '1';
+                fd.textContent = '确认删除？';
+                setTimeout(() => { fd.dataset.armed = ''; fd.textContent = '删除'; }, 4000);
+            }
+            return;
+        }
         const btn = e.target.closest('[data-view]');
         const row = e.target.closest('tr[data-path]');
         const path = btn ? btn.dataset.view : row ? row.dataset.path : null;

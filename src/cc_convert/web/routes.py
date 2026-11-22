@@ -676,6 +676,30 @@ async def update_instance(request: Request, instance_id: str):
     data.pop("instance_uptime", None)
     data.pop("id", None)
 
+    # Rename the bound settings file when the instance is renamed and the
+    # file follows the panel's default naming (<old-name>-claude.json).
+    # Custom file names are left alone — the user chose them deliberately.
+    new_name = data.get("name")
+    if (
+        isinstance(new_name, str)
+        and new_name
+        and instance.claude_config_path
+        and new_name != instance.name
+    ):
+        from cc_convert.claude_settings_file import claude_config_dir, resolve_path
+
+        bound_path = resolve_path(instance.claude_config_path)
+        default_stem = f"{instance.name}-claude.json"
+        if bound_path.name == default_stem:
+            target = claude_config_dir() / f"{new_name}-claude.json"
+            if target.exists():
+                raise HTTPException(
+                    409, detail=f"配置文件重命名冲突：{target} 已存在"
+                )
+            bound_path.rename(target)
+            instance.claude_config_path = str(target)
+            save_profile_store(store)
+
     if not data:
         st = await supervisor.get_instance_status(instance_id)
         return _instance_to_response(instance, st)
@@ -707,8 +731,18 @@ async def update_instance(request: Request, instance_id: str):
 
 
 @web_router.delete("/api/instances/{instance_id}")
-async def delete_instance(request: Request, instance_id: str):
-    """Delete an instance.  Only allowed if stopped."""
+async def delete_instance(
+    request: Request, instance_id: str, delete_config: bool = False
+):
+    """Delete an instance.  Only allowed if stopped.
+
+    ``delete_config`` also removes the bound Claude Code settings file. Without
+    it the file is left in place but stripped of the keys cc-convert manages,
+    so it stops pointing at a proxy that no longer exists.
+    """
+    from cc_convert.claude_config import TIER_KEYS
+    from cc_convert.claude_settings_file import remove_managed_keys, resolve_path
+
     store = _get_store(request)
     supervisor = _get_supervisor(request)
 
@@ -717,6 +751,23 @@ async def delete_instance(request: Request, instance_id: str):
             st = await supervisor.get_instance_status(instance_id)
             if st.get("status") == "running":
                 raise HTTPException(409, detail="Cannot delete running instance. Stop it first.")
+            if inst.claude_config_path:
+                bound_path = resolve_path(inst.claude_config_path)
+                if delete_config:
+                    try:
+                        bound_path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        raise HTTPException(500, detail=f"配置文件删除失败：{exc}")
+                else:
+                    owned = {
+                        "ANTHROPIC_BASE_URL",
+                        "ANTHROPIC_AUTH_TOKEN",
+                        "ANTHROPIC_MODEL",
+                        "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+                        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+                        *(key for key, _ in TIER_KEYS),
+                    }
+                    remove_managed_keys(bound_path, owned)
             store.instances.pop(i)
             save_profile_store(store)
             return {"success": True}
@@ -992,6 +1043,62 @@ async def list_claude_configs(request: Request):
         "files": files,
         "bound_count": len(bound),
     }
+
+
+@web_router.post("/api/claude-configs/rename")
+async def rename_claude_config(request: Request):
+    """Rename a settings file. Files bound to an instance move with it."""
+    from cc_convert.claude_settings_file import claude_config_dir, resolve_path
+
+    store = _get_store(request)
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON body")
+    old_raw = (data.get("path") or "").strip()
+    new_name = (data.get("new_name") or "").strip()
+    if not old_raw or not new_name:
+        raise HTTPException(422, detail="path 与 new_name 必填")
+    if not new_name.endswith(".json"):
+        new_name += ".json"
+    if "/" in new_name or "\\" in new_name or new_name in (".", ".."):
+        raise HTTPException(422, detail="文件名不能包含路径分隔符")
+
+    old_path = resolve_path(old_raw)
+    if not old_path.is_file():
+        raise HTTPException(404, detail="文件不存在")
+    new_path = claude_config_dir() / new_name
+    if new_path.exists():
+        raise HTTPException(409, detail=f"{new_name} 已存在")
+
+    old_path.rename(new_path)
+
+    # Keep the binding in step with the new file name.
+    for inst in store.instances:
+        if inst.claude_config_path and str(resolve_path(inst.claude_config_path)) == str(old_path):
+            inst.claude_config_path = str(new_path)
+    save_profile_store(store)
+    return {"path": str(new_path)}
+
+
+@web_router.delete("/api/claude-configs")
+async def delete_claude_config(request: Request, path: str):
+    """Delete an unbound settings file. Bound files must be unbound first."""
+    from cc_convert.claude_settings_file import resolve_path
+
+    store = _get_store(request)
+    target = resolve_path(path)
+    if not target.is_file():
+        raise HTTPException(404, detail="文件不存在")
+    if target.name == "settings.json":
+        raise HTTPException(409, detail="主 settings.json 不允许在此删除")
+    for inst in store.instances:
+        if inst.claude_config_path and str(resolve_path(inst.claude_config_path)) == str(target):
+            raise HTTPException(
+                409, detail=f"该文件已绑定到实例「{inst.name}」，请先在实例配置页解除绑定"
+            )
+    target.unlink()
+    return {"success": True}
 
 
 @web_router.get("/api/claude-configs/content")

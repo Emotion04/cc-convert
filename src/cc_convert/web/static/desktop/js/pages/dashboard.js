@@ -40,6 +40,26 @@ export async function render(view, params, ctx) {
             <button type="button" class="ui-button ui-button--primary" id="btnAddEmpty">创建实例</button>
         </div>
 
+        <dialog id="deleteDialog" class="ui-dialog">
+            <div class="desktop-form" style="padding:20px; min-width:380px">
+                <h3 style="margin:0 0 6px">删除实例</h3>
+                <p class="desktop-hint" style="margin:0 0 10px">
+                    将删除实例 <strong id="delName"></strong>（<span class="desktop-mono" id="delPort"></span>）。此操作不可撤销。
+                </p>
+                <label class="desktop-row" id="delConfigRow" style="font-size:13px" hidden>
+                    <input type="checkbox" id="delConfig" checked>
+                    <span>同时删除绑定的配置文件&nbsp;<span class="desktop-mono desktop-muted" id="delConfigName"></span></span>
+                </label>
+                <p class="desktop-hint" id="delConfigHint" hidden>
+                    不勾选时，配置文件保留，但会清理其中由 CC Convert 写入的字段（避免残留指向已删除的代理端口）。
+                </p>
+                <div class="ui-row" style="justify-content:end; margin-top:12px">
+                    <button type="button" class="ui-button" data-ui-close>取消</button>
+                    <button type="button" class="ui-button ui-button--danger" id="delConfirm">删除</button>
+                </div>
+            </div>
+        </dialog>
+
         <dialog id="settingsDialog" class="ui-dialog">
             <div class="desktop-form" style="padding:20px; min-width:360px">
                 <h3 style="margin:0">设置</h3>
@@ -144,6 +164,9 @@ export async function render(view, params, ctx) {
                 <div class="ui-cluster" style="gap:6px">
                     <button type="button" class="ui-button ui-button--danger" data-act="delete" data-id="${inst.id}">删除</button>
                     <button type="button" class="ui-button" data-act="edit" data-id="${inst.id}">编辑</button>
+                ${inst.claude_config_path
+                    ? `<button type="button" class="ui-button" data-act="unbind" data-id="${inst.id}">解除绑定</button>`
+                    : `<button type="button" class="ui-button" data-act="genconfig" data-id="${inst.id}">生成配置</button>`}
                     <button type="button" class="ui-button" data-act="duplicate" data-id="${inst.id}">复制</button>
                     <div class="ui-cluster" style="position:relative">
                         <button type="button" class="ui-button" data-act="copy" data-id="${inst.id}">复制配置</button>
@@ -232,10 +255,11 @@ export async function render(view, params, ctx) {
         navigator.clipboard.writeText(text).then(() => toast('配置已复制到剪贴板', 'success'));
     }
 
-    async function doDelete(inst) {
+    async function doDelete(inst, deleteConfig) {
+        const qs = deleteConfig ? '?delete_config=true' : '';
         try {
-            await api.del(`/api/instances/${inst.id}`);
-            toast('实例已删除', 'success');
+            await api.del(`/api/instances/${inst.id}${qs}`);
+            toast(deleteConfig ? '实例与配置文件已删除' : '实例已删除', 'success');
             await fetchAll();
         } catch (e) {
             toast(e.message || '删除失败', 'danger');
@@ -259,6 +283,15 @@ export async function render(view, params, ctx) {
         } catch (e) {
             toast(e.message || '保存失败', 'danger');
         }
+    });
+
+    // Delete-with-config dialog confirm
+    const delDlg = view.querySelector('#deleteDialog');
+    view.querySelector('#delConfirm').addEventListener('click', async () => {
+        const id = delDlg.dataset.target;
+        const inst = findInst(id);
+        delDlg.close();
+        if (inst) await doDelete(inst, view.querySelector('#delConfig').checked);
     });
 
     // Global click delegation
@@ -287,6 +320,33 @@ export async function render(view, params, ctx) {
                     setTimeout(() => document.addEventListener('click', close), 0);
                 }
             }
+        } else if (act === 'genconfig') {
+            busy[inst.id] = 'genconfig';
+            renderInstances();
+            try {
+                const res = await api.post(`/api/instances/${inst.id}/claude-config`, {
+                    path: `${inst.name}-claude.json`,
+                    create: true,
+                });
+                toast(`已生成 ${inst.name}-claude.json 并绑定`, 'success');
+            } catch (e) {
+                toast('生成配置失败：' + e.message, 'danger');
+            } finally {
+                busy[inst.id] = null;
+                await fetchAll();
+            }
+        } else if (act === 'unbind') {
+            busy[inst.id] = 'unbind';
+            renderInstances();
+            try {
+                await api.del(`/api/instances/${inst.id}/claude-config`);
+                toast('已解除绑定（配置文件中的相关字段已清理）', 'success');
+            } catch (e) {
+                toast('解除绑定失败：' + e.message, 'danger');
+            } finally {
+                busy[inst.id] = null;
+                await fetchAll();
+            }
         } else if (act === 'duplicate') {
             busy[inst.id] = 'duplicate';
             renderInstances();
@@ -308,10 +368,22 @@ export async function render(view, params, ctx) {
                 toast('请先停止实例再删除', 'warning');
                 return;
             }
-            // Two-step destructive confirm (universal-ui arm button semantics).
-            if (btn.dataset.armed) {
+            if (inst.claude_config_path) {
+                // Bound instances get a dialog with the config-file option —
+                // an arm-button can't carry a checkbox choice.
+                const dlg = view.querySelector('#deleteDialog');
+                view.querySelector('#delName').textContent = inst.name;
+                view.querySelector('#delPort').textContent = inst.port;
+                view.querySelector('#delConfigRow').hidden = false;
+                view.querySelector('#delConfigName').textContent =
+                    inst.claude_config_path.split(/[\/]/).pop();
+                view.querySelector('#delConfigHint').hidden = false;
+                view.querySelector('#delConfig').checked = true;
+                dlg.dataset.target = inst.id;
+                dlg.showModal();
+            } else if (btn.dataset.armed) {
                 btn.dataset.armed = '';
-                await doDelete(inst);
+                await doDelete(inst, false);
             } else {
                 btn.dataset.armed = '1';
                 btn.textContent = '确认删除？';
